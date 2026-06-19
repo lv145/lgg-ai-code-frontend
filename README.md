@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # lgg-aicode-frontend
 
 This template should help get you started developing with Vue 3 in Vite.
@@ -46,3 +47,7 @@ npm run build
 ```sh
 npm run lint
 ```
+=======
+# lgg-ai-code-frontend
+AI零代码生成器前端
+>>>>>>> 6d5e06f697101f204be0ff18a9016bc11d9ac0ee
