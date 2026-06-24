@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { PaperClipOutlined, SendOutlined } from '@ant-design/icons-vue'
-import { addApp, listMyAppVoByPage, listFeaturedAppVoByPage } from '@/api/appController'
+import { addApp, listAppVoByPage, listMyAppVoByPage, listFeaturedAppVoByPage } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
+import ACCESS_ENUM from '@/access/accessEnum'
 import AppCard from '@/components/AppCard.vue'
 
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 const deployBaseUrl = import.meta.env.VITE_APP_DEPLOY_BASE_URL || 'http://localhost'
 const pendingPromptStoragePrefix = 'app-chat-pending-prompt:'
+const isAdmin = computed(() => loginUserStore.loginUser?.userRole === ACCESS_ENUM.ADMIN)
+const myAppsTitle = computed(() => (isAdmin.value ? '全部作品' : '我的作品'))
 
 // 提示词输入
 const prompt = ref('')
@@ -70,7 +73,9 @@ const handleCreateApp = async () => {
 
 // 获取我的应用列表
 const fetchMyApps = async () => {
-  const res = await listMyAppVoByPage(myAppsParams)
+  const res = isAdmin.value
+    ? await listAppVoByPage(myAppsParams)
+    : await listMyAppVoByPage(myAppsParams)
   if (res.data.code === 0 && res.data.data) {
     myApps.value = res.data.data.records ?? []
     myAppsTotal.value = res.data.data.totalRow ?? 0
@@ -101,11 +106,8 @@ const handleFeaturedAppsPageChange = (page: number, pageSize: number) => {
 }
 
 // 跳转到应用对话页
-const goToAppChat = (appId: string, withViewQuery = true) => {
-  router.push({
-    path: `/app/chat/${appId}`,
-    query: withViewQuery ? { view: '1' } : {},
-  })
+const goToAppChat = (appId: string) => {
+  router.push(`/app/chat/${appId}`)
 }
 
 // 打开查看作品
@@ -114,7 +116,10 @@ const openAppWork = (deployKey?: string) => {
   window.open(`${deployBaseUrl}/${deployKey}`, '_blank', 'noopener,noreferrer')
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (!loginUserStore.loginUser?.id) {
+    await loginUserStore.fetchLoginUser()
+  }
   fetchMyApps()
   fetchFeaturedApps()
 })
@@ -174,7 +179,7 @@ onMounted(() => {
     <!-- 我的应用列表 -->
     <div class="section">
       <div class="section-header">
-        <h2 class="section-title">我的作品</h2>
+        <h2 class="section-title">{{ myAppsTitle }}</h2>
       </div>
       <div class="app-grid">
         <AppCard

@@ -9,10 +9,10 @@ import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
 import 'highlight.js/styles/github.css'
-import { 
-  SendOutlined, 
-  RocketOutlined, 
-  UserOutlined, 
+import {
+  SendOutlined,
+  RocketOutlined,
+  UserOutlined,
   PaperClipOutlined,
   EditOutlined,
   ArrowLeftOutlined,
@@ -20,7 +20,11 @@ import {
   CheckCircleOutlined,
   CopyOutlined
 } from '@ant-design/icons-vue'
-import { getAppVoById, deployApp, deleteApp, adminDeleteApp } from '@/api/appController'
+import { getAppById, getAppVoById, deployApp, deleteApp, adminDeleteApp } from '@/api/appController'
+import {
+  listAppChatHistoryByPage,
+  listChatHistoryVoByPage,
+} from '@/api/chatHistoryController'
 import { getUserVoById } from '@/api/userController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import ACCESS_ENUM from '@/access/accessEnum'
@@ -38,8 +42,10 @@ hljs.registerLanguage('ts', typescript)
 const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
-const appId = computed(() => route.params.id as string)
-const isViewMode = computed(() => route.query.view === '1')
+const appId = computed(() => {
+  const id = route.params.id
+  return Array.isArray(id) ? (id[0] ?? '') : (id ?? '')
+})
 const isOwnApp = computed(() => {
   return !!appInfo.value.userId && String(appInfo.value.userId) === String(loginUserStore.loginUser?.id)
 })
@@ -53,12 +59,13 @@ const backendOrigin = apiBaseUrl.replace(/\/api\/?$/, '')
 const pendingPromptStoragePrefix = 'app-chat-pending-prompt:'
 
 // 应用信息
-const appInfo = ref<API.AppVO>({})
+const appInfo = ref<API.App | API.AppVO>({})
 const creatorInfo = ref<API.UserVO>({})
 
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
+  createTime?: string
   html?: string
 }
 
@@ -67,6 +74,11 @@ const messages = ref<ChatMessage[]>([])
 const userInput = ref('')
 const isLoading = ref(false)
 const isStreaming = ref(false)
+const isHistoryLoading = ref(false)
+const hasMoreHistory = ref(false)
+const historyTotal = ref(0)
+const historyLoaded = ref(false)
+const historyCursor = ref<string>()
 const currentStreamingMessage = ref('')
 let streamingDraft = ''
 let streamingFlushTimer: number | undefined
@@ -96,6 +108,80 @@ const markdown = new MarkdownIt({
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   return markdown.render(content)
+}
+
+const formatMessageTime = (time?: string) => {
+  if (!time) return ''
+  const date = new Date(time)
+  if (Number.isNaN(date.getTime())) {
+    return time
+  }
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+const getHistoryRole = (messageType?: string): ChatMessage['role'] => {
+  const normalizedType = messageType?.toLowerCase()
+  if (normalizedType === 'user') {
+    return 'user'
+  }
+  return 'assistant'
+}
+
+const toChatMessage = (history: API.ChatHistory): ChatMessage => {
+  const role = getHistoryRole(history.messageType)
+  const content = history.message || ''
+  return {
+    role,
+    content,
+    createTime: history.createTime,
+    html: role === 'assistant' ? renderMarkdown(content) : undefined,
+  }
+}
+
+const sortHistoriesAsc = (records: API.ChatHistory[]) => {
+  return [...records].sort((left, right) => {
+    return new Date(left.createTime || '').getTime() - new Date(right.createTime || '').getTime()
+  })
+}
+
+const refreshHistoryCursor = () => {
+  historyCursor.value = messages.value.find((item) => item.createTime)?.createTime
+}
+
+const refreshHasMoreHistory = (recordsLength: number) => {
+  if (historyTotal.value > 0) {
+    hasMoreHistory.value = messages.value.length < historyTotal.value
+    return
+  }
+  hasMoreHistory.value = recordsLength >= 10
+}
+
+const listCurrentAppHistory = (loadMore: boolean) => {
+  if (isAdmin.value) {
+    const body: API.ChatHistoryQueryRequest = {
+      appId: appId.value,
+      pageSize: 10,
+    }
+    if (loadMore && historyCursor.value) {
+      body.lastCreateTime = historyCursor.value
+    }
+    return listChatHistoryVoByPage(body)
+  }
+
+  const params: API.listAppChatHistoryByPageParams = {
+    appId: appId.value,
+    pageSize: 10,
+  }
+  if (loadMore && historyCursor.value) {
+    params.lastCreateTime = historyCursor.value
+  }
+  return listAppChatHistoryByPage(params)
 }
 
 const getGeneratedPreviewUrl = () => {
@@ -132,8 +218,10 @@ const appendStreamingContent = (text: string) => {
     flushStreamingContent()
   }, 120)
 }
-
+// 检查预览是否准备就绪
 const checkPreviewReady = async (url: string) => {
+  // 如果预览未准备就绪，等待5秒后重试
+  // 如果5秒后仍未准备就绪，返回false
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), 5000)
 
@@ -151,8 +239,9 @@ const checkPreviewReady = async (url: string) => {
     window.clearTimeout(timer)
   }
 }
-
+// 加载生成的预览
 const loadGeneratedPreview = async () => {
+  //
   if (!appInfo.value.codeGenType) {
     return false
   }
@@ -223,7 +312,7 @@ const fetchCreatorInfo = async () => {
   }
 
   try {
-    const res = await getUserVoById({ id: String(appInfo.value.userId) })
+    const res = await getUserVoById({ id: appInfo.value.userId })
     if (res.data.code === 0 && res.data.data) {
       creatorInfo.value = res.data.data
     }
@@ -262,20 +351,63 @@ const handleDeleteApp = () => {
 }
 
 // 获取应用信息
+const loadHistory = async (loadMore = false) => {
+  if (!appId.value || isHistoryLoading.value) return
+  isHistoryLoading.value = true
+  const chatContainer = document.querySelector('.chat-messages')
+  const previousScrollHeight = chatContainer?.scrollHeight ?? 0
+  try {
+    const res = await listCurrentAppHistory(loadMore)
+    if (res.data.code === 0 && res.data.data) {
+      historyTotal.value = res.data.data.totalRow ?? 0
+      const records = sortHistoriesAsc(res.data.data.records ?? [])
+      const historyMessages = records.map(toChatMessage)
+      messages.value = loadMore ? [...historyMessages, ...messages.value] : historyMessages
+      refreshHistoryCursor()
+      refreshHasMoreHistory(records.length)
+      historyLoaded.value = true
+      await nextTick()
+      if (loadMore) {
+        const updatedChatContainer = document.querySelector('.chat-messages')
+        if (updatedChatContainer) {
+          updatedChatContainer.scrollTop = updatedChatContainer.scrollHeight - previousScrollHeight
+        }
+      } else {
+        scrollToBottom()
+      }
+    } else {
+      message.error('获取对话历史失败：' + res.data.message)
+    }
+  } catch (error) {
+    message.error('获取对话历史失败')
+    console.error('Fetch chat history error:', error)
+  } finally {
+    isHistoryLoading.value = false
+  }
+}
+
+const fetchCurrentAppInfo = () => {
+  const params = { id: appId.value }
+  return isAdmin.value ? getAppById(params) : getAppVoById(params)
+}
+
 const fetchAppInfo = async () => {
   if (!appId.value) return
-  const res = await getAppVoById({ id: appId.value })
+  if (!loginUserStore.loginUser?.id) {
+    await loginUserStore.fetchLoginUser()
+  }
+  const res = await fetchCurrentAppInfo()
   if (res.data.code === 0 && res.data.data) {
     appInfo.value = res.data.data
     await fetchCreatorInfo()
-    const hasGeneratedPreview = await restoreGeneratedPreview()
-    if (hasGeneratedPreview) {
-      return
+    await loadHistory()
+    if (messages.value.length >= 2) {
+      await restoreGeneratedPreview()
     }
 
     const pendingPrompt = consumePendingPrompt()
     const autoPrompt = pendingPrompt || appInfo.value.initPrompt || ''
-    if (autoPrompt && !isViewMode.value && canChat.value) {
+    if (autoPrompt && canChat.value && messages.value.length === 0) {
       await sendMessage(autoPrompt)
     }
   }
@@ -288,24 +420,24 @@ const sendMessage = async (content: string) => {
     return
   }
   if (!content.trim() || isLoading.value) return
-  
+
   // 添加用户消息
-  messages.value.push({ role: 'user', content })
+  messages.value.push({ role: 'user', content, createTime: new Date().toISOString() })
   userInput.value = ''
-  
+
   // 滚动到底部
   await nextTick()
   scrollToBottom()
-  
+
   // 开始流式请求
   isLoading.value = true
   isStreaming.value = true
   previewStatus.value = 'idle'
   resetStreamingContent()
-  
+
   try {
     const url = new URL('/api/app/chat/gen/code', backendOrigin)
-    url.searchParams.set('appId', appId.value)
+    url.searchParams.set('appId', String(appId.value))
     url.searchParams.set('message', content)
     const response = await fetch(url.toString(), {
       credentials: 'include',
@@ -346,13 +478,14 @@ const sendMessage = async (content: string) => {
     // 添加AI回复
     if (currentStreamingMessage.value) {
       const content = currentStreamingMessage.value
-      messages.value.push({ 
-        role: 'assistant', 
+      messages.value.push({
+        role: 'assistant',
         content,
+        createTime: new Date().toISOString(),
         html: renderMarkdown(content),
       })
       resetStreamingContent()
-      
+
       await loadGeneratedPreview()
     }
   } catch (error) {
@@ -376,7 +509,7 @@ const handleKeyPress = (e: KeyboardEvent) => {
 const handleDeploy = async () => {
   if (!appId.value || isDeploying.value) return
   isDeploying.value = true
-  
+
   try {
     const res = await deployApp({ appId: appId.value })
     if (res.data.code === 0 && res.data.data) {
@@ -438,8 +571,8 @@ onMounted(() => {
           <template #icon><InfoCircleOutlined /></template>
           应用详情
         </a-button>
-        <a-button 
-          type="primary" 
+        <a-button
+          type="primary"
           @click="handleDeploy"
           :disabled="!appId"
           :loading="isDeploying"
@@ -492,9 +625,14 @@ onMounted(() => {
       <div class="chat-section">
         <!-- 消息区域 -->
         <div class="chat-messages">
-          <div 
-            v-for="(msg, index) in messages" 
-            :key="index" 
+          <div v-if="historyLoaded && hasMoreHistory" class="load-more-history">
+            <a-button type="link" :loading="isHistoryLoading" @click="loadHistory(true)">
+              加载更多
+            </a-button>
+          </div>
+          <div
+            v-for="(msg, index) in messages"
+            :key="index"
             :class="['message', msg.role]"
           >
             <div class="message-avatar">
@@ -510,9 +648,12 @@ onMounted(() => {
                 v-html="msg.html || renderMarkdown(msg.content)"
               />
               <div v-else class="message-text">{{ msg.content }}</div>
+              <div v-if="msg.createTime" class="message-time">
+                {{ formatMessageTime(msg.createTime) }}
+              </div>
             </div>
           </div>
-          
+
           <!-- 流式消息 -->
           <div v-if="isStreaming && currentStreamingMessage" class="message assistant">
             <div class="message-avatar">
@@ -522,7 +663,7 @@ onMounted(() => {
               <pre class="message-text streaming-text">{{ currentStreamingMessage }}</pre>
             </div>
           </div>
-          
+
           <!-- 加载状态 -->
           <div v-if="isLoading && !isStreaming" class="message assistant">
             <div class="message-avatar">
@@ -560,9 +701,9 @@ onMounted(() => {
                   <template #icon><EditOutlined /></template>
                 </a-button>
               </div>
-              <a-button 
-                type="primary" 
-                shape="circle" 
+              <a-button
+                type="primary"
+                shape="circle"
                 :disabled="!userInput.trim() || isLoading || !canChat"
                 @click="sendMessage(userInput)"
               >
@@ -577,9 +718,9 @@ onMounted(() => {
       <!-- 右侧网页展示区域 -->
       <div class="preview-section">
         <div v-if="previewStatus === 'ready'" class="preview-container">
-          <iframe 
+          <iframe
             :key="previewFrameKey"
-            :src="previewUrl" 
+            :src="previewUrl"
             class="preview-iframe"
             sandbox="allow-scripts allow-same-origin"
           />
@@ -706,7 +847,8 @@ onMounted(() => {
 }
 
 .chat-section {
-  flex: 2 1 0;
+  flex: 0 0 50%;
+  max-width: 50%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -718,30 +860,57 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px;
 }
 
-.message {
+.load-more-history {
   display: flex;
-  gap: 10px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.message {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: start;
+  column-gap: 10px;
   margin-bottom: 16px;
-  max-width: 80%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .message.user {
-  margin-left: auto;
-  flex-direction: row-reverse;
+  margin-left: 0;
 }
 
 .message-avatar {
+  grid-column: 1;
   flex-shrink: 0;
 }
 
 .message-content {
+  grid-column: 2;
+  max-width: 100%;
+  min-width: 0;
   background: white;
   border-radius: 12px;
   padding: 10px 14px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  overflow-wrap: anywhere;
+}
+
+.message.user .message-avatar {
+  grid-column: 3;
+}
+
+.message.user .message-content {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .message.user .message-content {
@@ -755,14 +924,30 @@ onMounted(() => {
   word-break: break-word;
 }
 
+.message-time {
+  margin-top: 8px;
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1;
+  text-align: left;
+}
+
+.message.user .message-time {
+  color: rgba(255, 255, 255, 0.72);
+  text-align: right;
+}
+
 .streaming-text {
   max-height: 420px;
   max-width: min(720px, 100%);
   margin: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   color: #1f2933;
   font-size: 13px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: #f6f8fa;
 }
 
@@ -846,6 +1031,8 @@ onMounted(() => {
   color: #c41d7f;
   font-size: 13px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: #f6f8fa;
   border-radius: 4px;
 }
@@ -853,7 +1040,9 @@ onMounted(() => {
 .markdown-body :deep(pre) {
   margin: 12px 0;
   padding: 14px 16px;
-  overflow-x: auto;
+  max-width: 100%;
+  overflow-x: hidden;
+  white-space: pre-wrap;
   background: #f6f8fa;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -865,7 +1054,9 @@ onMounted(() => {
   color: inherit;
   font-size: 13px;
   line-height: 1.65;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   background: transparent;
   border-radius: 0;
 }
@@ -947,7 +1138,7 @@ onMounted(() => {
 }
 
 .preview-section {
-  flex: 3 1 0;
+  flex: 1 1 50%;
   min-width: 0;
   background: white;
   display: flex;
@@ -989,18 +1180,19 @@ onMounted(() => {
   .main-content {
     flex-direction: column;
   }
-  
+
   .chat-section {
+    max-width: none;
     border-right: none;
     border-bottom: 1px solid #e8e8e8;
     height: 50%;
   }
-  
+
   .preview-section {
     width: 100%;
     height: 50%;
   }
-  
+
   .message {
     max-width: 90%;
   }

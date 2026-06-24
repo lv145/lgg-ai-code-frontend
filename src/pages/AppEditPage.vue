@@ -10,27 +10,37 @@
         <a-form-item label="应用名称" name="appName" :rules="[{ required: true, message: '请输入应用名称' }]">
           <a-input v-model:value="formData.appName" placeholder="请输入应用名称" />
         </a-form-item>
-        
+
         <a-form-item label="应用封面" name="cover" v-if="isAdmin">
           <a-input v-model:value="formData.cover" placeholder="请输入封面图片URL" />
           <div class="cover-preview" v-if="formData.cover">
             <a-image :src="formData.cover" :width="200" />
           </div>
         </a-form-item>
-        
+
         <a-form-item label="优先级" name="priority" v-if="isAdmin">
           <a-input-number v-model:value="formData.priority" :min="0" :max="99" />
           <div class="priority-tip">设置为99表示精选应用</div>
         </a-form-item>
-        
-        <a-form-item label="应用ID">
-          <a-input :value="appId" disabled />
-        </a-form-item>
-        
-        <a-form-item label="创建时间">
-          <a-input :value="formatDate(appInfo.createTime)" disabled />
-        </a-form-item>
-        
+
+        <a-divider orientation="left">应用信息</a-divider>
+
+        <a-descriptions :column="1" bordered size="small" class="app-info-descriptions">
+          <a-descriptions-item label="应用ID">{{ appInfo.id || appId }}</a-descriptions-item>
+          <a-descriptions-item label="创建用户ID">{{ appInfo.userId || '-' }}</a-descriptions-item>
+          <a-descriptions-item v-if="!isAdmin" label="创建用户">
+          </a-descriptions-item>
+          <a-descriptions-item label="初始提示词">{{ appInfo.initPrompt || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="代码生成类型">{{ appInfo.codeGenType || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="部署标识">{{ appInfo.deployKey || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="部署时间">{{ formatDate(appInfo.deployedTime) }}</a-descriptions-item>
+          <a-descriptions-item label="创建时间">{{ formatDate(appInfo.createTime) }}</a-descriptions-item>
+          <a-descriptions-item v-if="isAdmin" label="编辑时间">
+            {{ formatDate(adminAppInfo.editTime) }}
+          </a-descriptions-item>
+          <a-descriptions-item label="更新时间">{{ formatDate(appInfo.updateTime) }}</a-descriptions-item>
+        </a-descriptions>
+
         <a-form-item :wrapper-col="{ offset: 4, span: 16 }">
           <a-space>
             <a-button type="primary" html-type="submit" :loading="loading">保存</a-button>
@@ -46,18 +56,21 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { getAppVoById, updateApp, adminUpdateApp } from '@/api/appController'
+import { getAppById, getAppVoById, updateApp, adminUpdateApp } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import ACCESS_ENUM from '@/access/accessEnum'
 
 const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
-const appId = computed(() => route.params.id as string)
+const appId = computed(() => {
+  const id = route.params.id
+  return Array.isArray(id) ? (id[0] ?? '') : (id ?? '')
+})
 const loading = ref(false)
 
 // 应用信息
-const appInfo = ref<API.AppVO>({})
+const appInfo = ref<API.App | API.AppVO>({})
 
 // 表单数据
 const formData = reactive({
@@ -70,12 +83,14 @@ const formData = reactive({
 const isAdmin = computed(() => {
   return loginUserStore.loginUser?.userRole === ACCESS_ENUM.ADMIN
 })
+const adminAppInfo = computed(() => appInfo.value as API.App)
+
 
 // 格式化日期
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN', {
+  return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -84,14 +99,17 @@ const formatDate = (dateStr?: string) => {
   })
 }
 
+
 // 获取应用信息
 const fetchAppInfo = async () => {
   if (!appId.value) return
-  const res = await getAppVoById({ id: appId.value })
+  const res = isAdmin.value
+    ? await getAppById({ id: appId.value })
+    : await getAppVoById({ id: appId.value })
   if (res.data.code === 0 && res.data.data) {
     appInfo.value = res.data.data
     // 检查权限：普通用户只能编辑自己的应用
-    if (!isAdmin.value && appInfo.value.userId !== loginUserStore.loginUser?.id) {
+    if (!isAdmin.value && String(appInfo.value.userId) !== String(loginUserStore.loginUser?.id)) {
       message.error('您没有权限编辑此应用')
       router.back()
       return
@@ -126,7 +144,7 @@ const handleSubmit = async () => {
         appName: formData.appName,
       })
     }
-    
+
     if (res.data.code === 0) {
       message.success('保存成功')
       router.back()
@@ -166,5 +184,17 @@ onMounted(() => {
   margin-top: 4px;
   color: #999;
   font-size: 12px;
+}
+
+.app-info-descriptions {
+  margin-bottom: 24px;
+}
+
+.app-info-descriptions :deep(.ant-descriptions-item-label) {
+  width: 140px;
+}
+
+.app-info-descriptions :deep(.ant-descriptions-item-content) {
+  word-break: break-all;
 }
 </style>

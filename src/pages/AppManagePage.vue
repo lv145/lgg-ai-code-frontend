@@ -135,7 +135,8 @@ const doSearch = () => {
 }
 
 // 删除应用
-const doDelete = (id: string) => {
+const doDelete = (id?: string) => {
+  if (!id) return
   Modal.confirm({
     title: '确认删除',
     content: '确定要删除这个应用吗？删除后无法恢复。',

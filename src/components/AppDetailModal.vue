@@ -4,7 +4,7 @@ import { DeleteOutlined, EditOutlined } from '@ant-design/icons-vue'
 
 const props = defineProps<{
   open: boolean
-  appInfo: API.AppVO
+  appInfo: API.App | API.AppVO
   creatorInfo: API.UserVO
   canManageApp: boolean
 }>()

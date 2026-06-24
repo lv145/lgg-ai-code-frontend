@@ -1,6 +1,6 @@
 
 import {computed, h} from "vue";
-import {HomeOutlined, AppstoreOutlined} from "@ant-design/icons-vue";
+import {HomeOutlined, AppstoreOutlined, MessageOutlined} from "@ant-design/icons-vue";
 import type {MenuProps} from "ant-design-vue";
 import {useLoginUserStore} from "@/stores/loginUser";
 
@@ -35,12 +35,17 @@ export const originItems: MenuItemConfig[] = [
     title: '应用管理'
   },
   {
+    key: '/admin/chatHistoryManage',
+    icon: () => h(MessageOutlined),
+    label: '对话管理',
+    title: '对话管理'
+  },
+  {
     key: 'github',
     label:h('a', { href: 'https://github.com/lv145', target: '_blank' }, 'GitHub'),
     title: 'GitHub'
   },
 ]
-
 
 
 

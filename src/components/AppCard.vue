@@ -20,11 +20,17 @@ defineEmits<{
 }>()
 
 const creatorName = computed(() => {
-  return props.app.userName || props.currentUser?.userName || '无名'
+  if (props.currentUser?.id && String(props.currentUser.id) === String(props.app.userId)) {
+    return props.currentUser.userName || '无名'
+  }
+  return props.app.userId ? `用户 ${props.app.userId}` : '无名'
 })
 
 const creatorAvatar = computed(() => {
-  return props.app.userAvatar || props.currentUser?.userAvatar || defaultAvatar
+  if (props.currentUser?.id && String(props.currentUser.id) === String(props.app.userId)) {
+    return props.currentUser.userAvatar || defaultAvatar
+  }
+  return defaultAvatar
 })
 
 const footerText = computed(() => {

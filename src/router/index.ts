@@ -6,6 +6,7 @@ import UserManagePage from '../pages/UserManagePage.vue'
 import AppChatPage from '../pages/AppChatPage.vue'
 import AppManagePage from '../pages/AppManagePage.vue'
 import AppEditPage from '../pages/AppEditPage.vue'
+import ChatHistoryManagePage from '../pages/ChatHistoryManagePage.vue'
 import ACCESS_ENUM from "@/access/accessEnum.ts";
 
 const router = createRouter({
@@ -46,6 +47,14 @@ const router = createRouter({
       path: '/admin/appManage',
       name: '应用管理',
       component: AppManagePage,
+      meta: {
+        access: ACCESS_ENUM.ADMIN,
+      }
+    },
+    {
+      path: '/admin/chatHistoryManage',
+      name: '对话管理',
+      component: ChatHistoryManagePage,
       meta: {
         access: ACCESS_ENUM.ADMIN,
       }
