@@ -30,6 +30,7 @@ import { useLoginUserStore } from '@/stores/loginUser'
 import ACCESS_ENUM from '@/access/accessEnum'
 import aiAvatar from '@/assets/aiAvatar.png'
 import AppDetailModal from '@/components/AppDetailModal.vue'
+import {CODE_GEN_TYPE_ENUM} from "@/constants/codeGenType.ts";
 
 hljs.registerLanguage('html', xml)
 hljs.registerLanguage('xml', xml)
@@ -185,7 +186,9 @@ const listCurrentAppHistory = (loadMore: boolean) => {
 }
 
 const getGeneratedPreviewUrl = () => {
-  return `${apiBaseUrl}/static/${appInfo.value.codeGenType}_${appId.value}/`
+   const baseUrl = `${apiBaseUrl}/static/${appInfo.value.codeGenType}_${appId.value}/`
+  return appInfo.value.codeGenType === CODE_GEN_TYPE_ENUM.VUE_PROJECT
+    ? `${baseUrl}dist/index.html` : baseUrl
 }
 
 const sleep = (ms: number) => {
