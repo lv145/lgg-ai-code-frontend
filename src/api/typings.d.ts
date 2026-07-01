@@ -147,7 +147,7 @@ declare namespace API {
     createTime?: string;
     updateTime?: string;
     isDelete?: number;
-    parentId?: number;
+    parentId?: string;
   };
 
   type ChatHistoryQueryRequest = {
@@ -170,6 +170,10 @@ declare namespace API {
 
   type DeleteRequest = {
     id?: string;
+  };
+
+  type downloadParams = {
+    appId: string;
   };
 
   type getAppByIdParams = {

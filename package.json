@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "openapi2ts": "openapi2ts",
+    "openapi2ts": "openapi2ts && node scripts/fix-openapi-long-ids.cjs",
+    "fix-openapi-long-ids": "node scripts/fix-openapi-long-ids.cjs",
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons-vue'
+import { getCodeGenTypeLabel } from '@/constants/codeGenType'
 
 const props = defineProps<{
   open: boolean
@@ -21,6 +22,7 @@ const modalOpen = computed({
 })
 
 const creatorName = computed(() => props.creatorInfo.userName || '无名')
+const codeGenTypeLabel = computed(() => getCodeGenTypeLabel(props.appInfo.codeGenType))
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '-'
@@ -36,35 +38,51 @@ const formatDate = (dateStr?: string) => {
 </script>
 
 <template>
-  <a-modal v-model:open="modalOpen" :footer="null" :width="620" centered class="app-detail-modal">
+  <a-modal
+    v-model:open="modalOpen"
+    :footer="null"
+    :width="520"
+    title="应用详情"
+    centered
+    class="app-detail-modal"
+  >
     <div class="app-detail-panel">
-      <h3 class="detail-title">基础信息</h3>
-      <div class="detail-grid">
-        <div class="detail-item">
-          <div class="detail-label">创建者</div>
-          <div class="creator-info">
-            <a-avatar :src="creatorInfo.userAvatar" :size="32">
-              {{ creatorName.slice(0, 1) }}
-            </a-avatar>
-            <span class="creator-name">{{ creatorName }}</span>
+      <div class="detail-list">
+        <div class="detail-row">
+          <div class="detail-label">创建者：</div>
+          <div class="detail-content">
+            <div class="creator-info">
+              <a-avatar :src="creatorInfo.userAvatar" :size="32">
+                {{ creatorName.slice(0, 1) }}
+              </a-avatar>
+              <span class="creator-name">{{ creatorName }}</span>
+            </div>
           </div>
         </div>
-        <div class="detail-item">
-          <div class="detail-label">创建时间</div>
-          <div class="detail-value">{{ formatDate(appInfo.createTime) }}</div>
+        <div class="detail-row">
+          <div class="detail-label">创建时间：</div>
+          <div class="detail-content">
+            <span class="detail-value">{{ formatDate(appInfo.createTime) }}</span>
+          </div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">生成类型：</div>
+          <div class="detail-content">
+            <a-tag color="blue" class="code-type-tag">{{ codeGenTypeLabel }}</a-tag>
+          </div>
         </div>
       </div>
 
       <template v-if="canManageApp">
         <a-divider class="detail-divider" />
         <div class="detail-actions">
-          <a-button type="text" class="detail-action-button" @click="$emit('edit')">
+          <a-button type="primary" size="large" class="detail-action-button" @click="$emit('edit')">
             <template #icon><EditOutlined /></template>
-            修改作品
+            修改
           </a-button>
-          <a-button type="text" danger class="detail-action-button" @click="$emit('delete')">
+          <a-button danger size="large" class="detail-action-button" @click="$emit('delete')">
             <template #icon><DeleteOutlined /></template>
-            删除作品
+            删除
           </a-button>
         </div>
       </template>
@@ -74,59 +92,80 @@ const formatDate = (dateStr?: string) => {
 
 <style scoped>
 .app-detail-panel {
-  padding: 8px 8px 4px;
+  padding: 8px 4px 0;
 }
 
-.detail-title {
-  margin: 0 0 24px;
-  font-size: 22px;
-  font-weight: 600;
+.app-detail-modal :deep(.ant-modal-header) {
+  margin-bottom: 8px;
+}
+
+.app-detail-modal :deep(.ant-modal-title) {
   color: #1f2933;
+  font-size: 18px;
+  font-weight: 600;
 }
 
-.detail-grid {
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.detail-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 40px;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
 }
 
 .detail-label {
-  margin-bottom: 10px;
-  color: #8c8c8c;
+  color: #6b7280;
   font-size: 16px;
+  line-height: 24px;
 }
 
 .creator-info {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 10px;
+  gap: 8px;
 }
 
 .creator-name,
 .detail-value {
   min-width: 0;
   color: #1f2933;
-  font-size: 18px;
+  font-size: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.detail-content {
+  min-width: 0;
+}
+
+.code-type-tag {
+  margin-inline-end: 0;
+  padding: 1px 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .detail-divider {
-  margin: 28px 0 16px;
+  margin: 24px 0 18px;
 }
 
 .detail-actions {
   display: flex;
-  justify-content: center;
-  gap: 24px;
+  justify-content: flex-start;
+  gap: 16px;
 }
 
 .detail-action-button {
-  height: 42px;
-  padding: 0 12px;
-  font-size: 18px;
+  min-width: 88px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 16px;
 }
 
 @media (max-width: 768px) {
@@ -134,15 +173,27 @@ const formatDate = (dateStr?: string) => {
     padding: 4px 0;
   }
 
-  .detail-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
+  .detail-row {
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .detail-label,
+  .creator-name,
+  .detail-value {
+    font-size: 14px;
+  }
+
+  .code-type-tag {
+    font-size: 13px;
   }
 
   .detail-actions {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
+    gap: 10px;
+  }
+
+  .detail-action-button {
+    min-width: 80px;
+    font-size: 14px;
   }
 }
 </style>

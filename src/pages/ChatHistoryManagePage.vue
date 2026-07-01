@@ -86,7 +86,7 @@
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { listChatHistoryVoByPage } from '@/api/chatHistoryController'
+import { listChatHistoryByPage } from '@/api/chatHistoryController'
 
 const data = ref<API.ChatHistory[]>([])
 const total = ref(0)
@@ -141,7 +141,7 @@ const doTableChange = (page: any) => {
 }
 
 const fetchData = async () => {
-  const res = await listChatHistoryVoByPage({
+  const res = await listChatHistoryByPage({
     ...searchParams,
   })
   if (res.data.code === 0 && res.data.data) {

@@ -18,19 +18,27 @@ import {
   ArrowLeftOutlined,
   InfoCircleOutlined,
   CheckCircleOutlined,
-  CopyOutlined
+  CopyOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons-vue'
-import { getAppById, getAppVoById, deployApp, deleteApp, adminDeleteApp } from '@/api/appController'
+import {
+  getAppById,
+  getAppVoById,
+  deployApp,
+  deleteApp,
+  adminDeleteApp,
+  download as downloadAppCode,
+} from '@/api/appController'
 import {
   listAppChatHistoryByPage,
-  listChatHistoryVoByPage,
+  listChatHistoryByPage,
 } from '@/api/chatHistoryController'
 import { getUserVoById } from '@/api/userController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import ACCESS_ENUM from '@/access/accessEnum'
 import aiAvatar from '@/assets/aiAvatar.png'
 import AppDetailModal from '@/components/AppDetailModal.vue'
-import {CODE_GEN_TYPE_ENUM} from "@/constants/codeGenType.ts";
+import { CODE_GEN_TYPE_ENUM, getCodeGenTypeLabel } from '@/constants/codeGenType'
 
 hljs.registerLanguage('html', xml)
 hljs.registerLanguage('xml', xml)
@@ -89,9 +97,11 @@ const previewUrl = ref('')
 const previewStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const previewFrameKey = ref(0)
 const isDeploying = ref(false)
+const isDownloading = ref(false)
 const detailModalOpen = ref(false)
 const deploySuccessModalOpen = ref(false)
 const deployedUrl = ref('')
+const codeGenTypeLabel = computed(() => getCodeGenTypeLabel(appInfo.value.codeGenType))
 
 const markdown = new MarkdownIt({
   html: true,
@@ -172,7 +182,7 @@ const listCurrentAppHistory = (loadMore: boolean) => {
     if (loadMore && historyCursor.value) {
       body.lastCreateTime = historyCursor.value
     }
-    return listChatHistoryVoByPage(body)
+    return listChatHistoryByPage(body)
   }
 
   const params: API.listAppChatHistoryByPageParams = {
@@ -531,6 +541,99 @@ const handleDeploy = async () => {
   }
 }
 
+const normalizeZipFileName = (fileName: string) => {
+  const trimmedFileName = fileName.trim().replace(/^["']|["']$/g, '')
+  if (!trimmedFileName) {
+    return 'app.zip'
+  }
+  return trimmedFileName.toLowerCase().endsWith('.zip') ? trimmedFileName : `${trimmedFileName}.zip`
+}
+
+const getDownloadFileName = (contentDisposition?: string) => {
+  const fallbackName = normalizeZipFileName(appInfo.value.appName || `app-${appId.value}`)
+  if (!contentDisposition) {
+    return fallbackName
+  }
+
+  const encodedFileName = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encodedFileName) {
+    try {
+      return normalizeZipFileName(decodeURIComponent(encodedFileName))
+    } catch {
+      return normalizeZipFileName(encodedFileName)
+    }
+  }
+
+  const quotedFileName = contentDisposition.match(/filename="([^"]+)"/i)?.[1]
+  if (quotedFileName) {
+    return normalizeZipFileName(quotedFileName)
+  }
+
+  const fileName = contentDisposition.match(/filename=([^;]+)/i)?.[1]
+  return fileName ? normalizeZipFileName(fileName) : fallbackName
+}
+
+const readBlobText = (blob: Blob) => {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
+
+const getDownloadErrorMessage = async (blob: Blob) => {
+  try {
+    const text = await readBlobText(blob)
+    if (!text) {
+      return '下载代码失败'
+    }
+    const result = JSON.parse(text)
+    return result?.message || '下载代码失败'
+  } catch {
+    return '下载代码失败'
+  }
+}
+
+const handleDownloadCode = async () => {
+  if (!appId.value || isDownloading.value) return
+  isDownloading.value = true
+
+  try {
+    const res = await downloadAppCode(
+      { appId: appId.value },
+      {
+        responseType: 'blob',
+      },
+    )
+    const blob = res.data instanceof Blob
+      ? res.data
+      : new Blob([res.data], { type: 'application/zip' })
+    const contentType = String(res.headers?.['content-type'] || blob.type || '').toLowerCase()
+    const isZipResponse = contentType.includes('application/zip') || contentType.includes('application/octet-stream')
+    if (res.status !== 200 || !isZipResponse) {
+      message.error(await getDownloadErrorMessage(blob))
+      return
+    }
+    const contentDisposition = res.headers?.['content-disposition']
+    const fileName = getDownloadFileName(contentDisposition)
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(downloadUrl)
+    message.success('下载已开始')
+  } catch (error) {
+    message.error('下载代码失败')
+    console.error('Download code error:', error)
+  } finally {
+    isDownloading.value = false
+  }
+}
+
 const copyDeployedUrl = async () => {
   if (!deployedUrl.value) return
   try {
@@ -568,11 +671,22 @@ onMounted(() => {
           <template #icon><ArrowLeftOutlined /></template>
         </a-button>
         <h1 class="app-title">{{ appInfo.appName || '应用生成中...' }}</h1>
+        <a-tag v-if="appInfo.codeGenType" color="blue" class="app-code-type-tag">
+          {{ codeGenTypeLabel }}
+        </a-tag>
       </div>
       <div class="top-bar-right">
         <a-button @click="detailModalOpen = true">
           <template #icon><InfoCircleOutlined /></template>
           应用详情
+        </a-button>
+        <a-button
+          @click="handleDownloadCode"
+          :disabled="!appId"
+          :loading="isDownloading"
+        >
+          <template #icon><DownloadOutlined /></template>
+          下载代码
         </a-button>
         <a-button
           type="primary"
@@ -768,6 +882,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .top-bar-right {
@@ -777,10 +892,19 @@ onMounted(() => {
 }
 
 .app-title {
+  min-width: 0;
   font-size: 18px;
   font-weight: 600;
   margin: 0;
   color: #1a1a1a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-code-type-tag {
+  flex-shrink: 0;
+  margin-inline-end: 0;
 }
 
 .deploy-success-panel {

@@ -23,7 +23,7 @@ export async function listAppChatHistoryByPage(
 }
 
 /** 此处后端没有提供注释 POST /chatHistory/list/page */
-export async function listChatHistoryVoByPage(
+export async function listChatHistoryByPage(
   body: API.ChatHistoryQueryRequest,
   options?: { [key: string]: any }
 ) {
