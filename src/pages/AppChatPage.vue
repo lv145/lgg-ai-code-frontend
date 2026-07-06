@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, nextTick, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import MarkdownIt from 'markdown-it'
@@ -39,6 +39,11 @@ import ACCESS_ENUM from '@/access/accessEnum'
 import aiAvatar from '@/assets/aiAvatar.png'
 import AppDetailModal from '@/components/AppDetailModal.vue'
 import { CODE_GEN_TYPE_ENUM, getCodeGenTypeLabel } from '@/constants/codeGenType'
+import {
+  isVisualEditorElementMessage,
+  VisualEditorController,
+  type VisualEditorElementInfo,
+} from '@/utils/visualEditor'
 
 hljs.registerLanguage('html', xml)
 hljs.registerLanguage('xml', xml)
@@ -64,8 +69,12 @@ const canChat = computed(() => {
 const isAdmin = computed(() => loginUserStore.loginUser?.userRole === ACCESS_ENUM.ADMIN)
 const canManageApp = computed(() => isOwnApp.value || isAdmin.value)
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '')
-const backendOrigin = apiBaseUrl.replace(/\/api\/?$/, '')
 const pendingPromptStoragePrefix = 'app-chat-pending-prompt:'
+
+const createApiUrl = (path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return new URL(`${apiBaseUrl}${normalizedPath}`, window.location.origin)
+}
 
 // 应用信息
 const appInfo = ref<API.App | API.AppVO>({})
@@ -93,9 +102,12 @@ let streamingDraft = ''
 let streamingFlushTimer: number | undefined
 
 // 网页预览相关
+const previewIframeRef = ref<HTMLIFrameElement>()
 const previewUrl = ref('')
 const previewStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const previewFrameKey = ref(0)
+const isVisualEditMode = ref(false)
+const selectedElementInfo = ref<VisualEditorElementInfo>()
 const isDeploying = ref(false)
 const isDownloading = ref(false)
 const detailModalOpen = ref(false)
@@ -196,9 +208,84 @@ const listCurrentAppHistory = (loadMore: boolean) => {
 }
 
 const getGeneratedPreviewUrl = () => {
-   const baseUrl = `${apiBaseUrl}/static/${appInfo.value.codeGenType}_${appId.value}/`
+  const baseUrl = createApiUrl(`/static/${appInfo.value.codeGenType}_${appId.value}/`).toString()
   return appInfo.value.codeGenType === CODE_GEN_TYPE_ENUM.VUE_PROJECT
     ? `${baseUrl}dist/index.html` : baseUrl
+}
+
+let visualEditorController: VisualEditorController | undefined
+
+const formatSelectedElementInfo = (elementInfo: VisualEditorElementInfo) => {
+  const segments = [
+    elementInfo.pagePath ? `页面路径：${elementInfo.pagePath}` : '',
+    `标签：${elementInfo.tagName}`,
+    elementInfo.id ? `ID：${elementInfo.id}` : '',
+    elementInfo.className ? `类名：${elementInfo.className}` : '',
+    elementInfo.text ? `文本：${elementInfo.text}` : '',
+    `选择器：${elementInfo.selector}`,
+  ].filter(Boolean)
+  return segments.join('；')
+}
+
+const buildPromptWithSelectedElement = (content: string) => {
+  if (!selectedElementInfo.value) {
+    return content
+  }
+
+  return `${content}
+
+请基于我在预览页面中选中的元素进行修改。
+选中元素信息：${formatSelectedElementInfo(selectedElementInfo.value)}`
+}
+
+const clearSelectedElement = () => {
+  selectedElementInfo.value = undefined
+  visualEditorController?.clearSelection()
+}
+
+const exitVisualEditMode = () => {
+  isVisualEditMode.value = false
+  clearSelectedElement()
+  visualEditorController?.disable()
+}
+
+const setupVisualEditor = async () => {
+  await nextTick()
+  if (!previewIframeRef.value || previewStatus.value !== 'ready') {
+    return false
+  }
+  visualEditorController?.destroy()
+  visualEditorController = new VisualEditorController(previewIframeRef.value)
+  if (isVisualEditMode.value) {
+    return visualEditorController.enable()
+  }
+  return true
+}
+
+const toggleVisualEditMode = async () => {
+  if (!canChat.value || previewStatus.value !== 'ready') {
+    message.warning('请先等待网页预览加载完成')
+    return
+  }
+
+  if (isVisualEditMode.value) {
+    exitVisualEditMode()
+    return
+  }
+
+  isVisualEditMode.value = true
+  const enabled = await setupVisualEditor()
+  if (!enabled) {
+    isVisualEditMode.value = false
+    message.warning('当前预览页面无法进入可视化编辑，请确认预览与主站同源')
+  }
+}
+
+const handleVisualEditorMessage = (event: MessageEvent) => {
+  if (!isVisualEditorElementMessage(event)) {
+    return
+  }
+  selectedElementInfo.value = event.data.payload
 }
 
 const sleep = (ms: number) => {
@@ -433,10 +520,12 @@ const sendMessage = async (content: string) => {
     return
   }
   if (!content.trim() || isLoading.value) return
+  const requestContent = buildPromptWithSelectedElement(content)
 
   // 添加用户消息
-  messages.value.push({ role: 'user', content, createTime: new Date().toISOString() })
+  messages.value.push({ role: 'user', content: requestContent, createTime: new Date().toISOString() })
   userInput.value = ''
+  exitVisualEditMode()
 
   // 滚动到底部
   await nextTick()
@@ -449,9 +538,9 @@ const sendMessage = async (content: string) => {
   resetStreamingContent()
 
   try {
-    const url = new URL('/api/app/chat/gen/code', backendOrigin)
+    const url = createApiUrl('/app/chat/gen/code')
     url.searchParams.set('appId', String(appId.value))
-    url.searchParams.set('message', content)
+    url.searchParams.set('message', requestContent)
     const response = await fetch(url.toString(), {
       credentials: 'include',
     })
@@ -658,7 +747,24 @@ const scrollToBottom = () => {
 }
 
 onMounted(() => {
+  window.addEventListener('message', handleVisualEditorMessage)
   fetchAppInfo()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('message', handleVisualEditorMessage)
+  visualEditorController?.destroy()
+})
+
+watch(previewFrameKey, () => {
+  clearSelectedElement()
+  setupVisualEditor()
+})
+
+watch(previewStatus, (status) => {
+  if (status !== 'ready') {
+    exitVisualEditMode()
+  }
 })
 </script>
 
@@ -797,6 +903,16 @@ onMounted(() => {
 
         <!-- 输入区域 -->
         <div class="chat-input-area">
+          <a-alert
+            v-if="selectedElementInfo"
+            class="selected-element-alert"
+            type="info"
+            show-icon
+            closable
+            :message="`已选择元素：${selectedElementInfo.tagName}`"
+            :description="formatSelectedElementInfo(selectedElementInfo)"
+            @close="clearSelectedElement"
+          />
           <a-tooltip
             :title="canChat ? '' : '无法在别人的作品下对话哦~'"
             placement="top"
@@ -818,14 +934,25 @@ onMounted(() => {
                   <template #icon><EditOutlined /></template>
                 </a-button>
               </div>
-              <a-button
-                type="primary"
-                shape="circle"
-                :disabled="!userInput.trim() || isLoading || !canChat"
-                @click="sendMessage(userInput)"
-              >
-                <template #icon><SendOutlined /></template>
-              </a-button>
+              <div class="send-actions">
+                <a-button
+                  :type="isVisualEditMode ? 'primary' : 'text'"
+                  size="small"
+                  :disabled="isLoading || !canChat || previewStatus !== 'ready'"
+                  @click="toggleVisualEditMode"
+                >
+                  <template #icon><EditOutlined /></template>
+                  {{ isVisualEditMode ? '退出编辑' : '编辑模式' }}
+                </a-button>
+                <a-button
+                  type="primary"
+                  shape="circle"
+                  :disabled="!userInput.trim() || isLoading || !canChat"
+                  @click="sendMessage(userInput)"
+                >
+                  <template #icon><SendOutlined /></template>
+                </a-button>
+              </div>
             </div>
           </div>
           </a-tooltip>
@@ -836,10 +963,12 @@ onMounted(() => {
       <div class="preview-section">
         <div v-if="previewStatus === 'ready'" class="preview-container">
           <iframe
+            ref="previewIframeRef"
             :key="previewFrameKey"
             :src="previewUrl"
             class="preview-iframe"
             sandbox="allow-scripts allow-same-origin"
+            @load="setupVisualEditor"
           />
         </div>
         <div v-else-if="previewStatus === 'loading'" class="preview-placeholder">
@@ -1234,6 +1363,14 @@ onMounted(() => {
   border-top: 1px solid #e8e8e8;
 }
 
+.selected-element-alert {
+  margin-bottom: 10px;
+}
+
+.selected-element-alert :deep(.ant-alert-description) {
+  word-break: break-word;
+}
+
 .input-wrapper {
   background: #f5f5f5;
   border-radius: 12px;
@@ -1262,6 +1399,12 @@ onMounted(() => {
 .action-buttons {
   display: flex;
   gap: 4px;
+}
+
+.send-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .preview-section {
