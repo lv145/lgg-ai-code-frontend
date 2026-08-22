@@ -11,8 +11,8 @@ import xml from 'highlight.js/lib/languages/xml'
 import 'highlight.js/styles/github.css'
 import {
   SendOutlined,
+  PauseCircleOutlined,
   RocketOutlined,
-  UserOutlined,
   PaperClipOutlined,
   EditOutlined,
   ArrowLeftOutlined,
@@ -24,10 +24,12 @@ import {
 import {
   getAppById,
   getAppVoById,
+  startGenerationTask,
   deployApp,
   deleteApp,
   adminDeleteApp,
   download as downloadAppCode,
+  stopChatToGenCode,
 } from '@/api/appController'
 import {
   listAppChatHistoryByPage,
@@ -44,6 +46,7 @@ import {
   VisualEditorController,
   type VisualEditorElementInfo,
 } from '@/utils/visualEditor'
+import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
 
 hljs.registerLanguage('html', xml)
 hljs.registerLanguage('xml', xml)
@@ -70,6 +73,8 @@ const isAdmin = computed(() => loginUserStore.loginUser?.userRole === ACCESS_ENU
 const canManageApp = computed(() => isOwnApp.value || isAdmin.value)
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '')
 const pendingPromptStoragePrefix = 'app-chat-pending-prompt:'
+const generationTaskStoragePrefix = 'app-chat-generation-task:'
+const generationCursorStoragePrefix = 'app-chat-generation-cursor:'
 
 const createApiUrl = (path: string) => {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
@@ -80,11 +85,51 @@ const createApiUrl = (path: string) => {
 const appInfo = ref<API.App | API.AppVO>({})
 const creatorInfo = ref<API.UserVO>({})
 
+type WorkflowEventType =
+  | 'workflow_start'
+  | 'step_completed'
+  | 'workflow_completed'
+  | 'workflow_error'
+
+type WorkflowEventPayload = {
+  originalPrompt?: string
+  message?: string
+  stepNumber?: number
+  currentStep?: string
+  error?: string
+}
+
+type WorkflowSseEvent = {
+  eventName: WorkflowEventType
+  data: WorkflowEventPayload
+}
+
+type BusinessErrorPayload = {
+  message?: string
+}
+
+type WorkflowTimelineStep = {
+  stepNumber: number
+  title: string
+}
+
+type WorkflowTimeline = {
+  status: 'running' | 'completed' | 'error' | 'stopped'
+  originalPrompt?: string
+  message?: string
+  completedMessage?: string
+  error?: string
+  steps: WorkflowTimelineStep[]
+}
+
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   createTime?: string
   html?: string
+  workflow?: WorkflowTimeline
+  workflowEvents?: WorkflowSseEvent[]
+  workflowGroupKey?: string
 }
 
 // 对话相关
@@ -92,20 +137,31 @@ const messages = ref<ChatMessage[]>([])
 const userInput = ref('')
 const isLoading = ref(false)
 const isStreaming = ref(false)
+const isStopping = ref(false)
 const isHistoryLoading = ref(false)
 const hasMoreHistory = ref(false)
 const historyTotal = ref(0)
 const historyLoaded = ref(false)
 const historyCursor = ref<string>()
 const currentStreamingMessage = ref('')
+const currentWorkflowTimeline = ref<WorkflowTimeline>()
 let streamingDraft = ''
+let streamingWorkflowEvents: WorkflowSseEvent[] = []
 let streamingFlushTimer: number | undefined
+let streamingPaintPending = false
+const currentStreamRequestId = ref('')
+let currentStreamAbortController: AbortController | undefined
+let currentStreamStopRequested = false
+let isPageUnmounting = false
 
 // 网页预览相关
 const previewIframeRef = ref<HTMLIFrameElement>()
 const previewUrl = ref('')
 const previewStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const previewFrameKey = ref(0)
+let currentPreviewSignature = ''
+let previewRefreshPromise: Promise<boolean> | undefined
+let previewRefreshSeq = 0
 const isVisualEditMode = ref(false)
 const selectedElementInfo = ref<VisualEditorElementInfo>()
 const isDeploying = ref(false)
@@ -131,6 +187,143 @@ const markdown = new MarkdownIt({
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   return markdown.render(content)
+}
+
+const workflowEventNames = new Set<WorkflowEventType>([
+  'workflow_start',
+  'step_completed',
+  'workflow_completed',
+  'workflow_error',
+])
+
+const isWorkflowEventName = (eventName?: string): eventName is WorkflowEventType => {
+  return workflowEventNames.has(eventName as WorkflowEventType)
+}
+
+const createWorkflowTimeline = (): WorkflowTimeline => ({
+  status: 'running',
+  steps: [],
+})
+
+const parseWorkflowSseEvent = (
+  eventName: string | undefined,
+  rawData: string,
+): WorkflowSseEvent | undefined => {
+  if (!isWorkflowEventName(eventName) || !rawData) {
+    return undefined
+  }
+
+  try {
+    const data = JSON.parse(rawData) as WorkflowEventPayload
+    return { eventName, data }
+  } catch {
+    return {
+      eventName,
+      data: {
+        message: rawData,
+      },
+    }
+  }
+}
+
+const applyWorkflowEvent = (timeline: WorkflowTimeline, workflowEvent: WorkflowSseEvent) => {
+  const { eventName, data } = workflowEvent
+
+  if (eventName === 'workflow_start') {
+    timeline.status = 'running'
+    timeline.originalPrompt = data.originalPrompt || timeline.originalPrompt
+    timeline.message = data.message || '开始执行代码生成工作流'
+    return
+  }
+
+  if (eventName === 'step_completed') {
+    const stepNumber = Number(data.stepNumber || timeline.steps.length + 1)
+    const title = data.currentStep || `第 ${stepNumber} 步`
+    const existingStep = timeline.steps.find((step) => step.stepNumber === stepNumber)
+    if (existingStep) {
+      existingStep.title = title
+      return
+    }
+    timeline.steps.push({ stepNumber, title })
+    timeline.steps.sort((left, right) => left.stepNumber - right.stepNumber)
+    return
+  }
+
+  if (eventName === 'workflow_completed') {
+    timeline.status = 'completed'
+    timeline.completedMessage = data.message || '代码生成工作流执行完成'
+    return
+  }
+
+  timeline.status = 'error'
+  timeline.error = data.error || data.message || '工作流执行失败'
+}
+
+const parseWorkflowEventsFromContent = (content: string) => {
+  const workflowEvents: WorkflowSseEvent[] = []
+  let eventName = ''
+  let dataLines: string[] = []
+
+  const commitEvent = () => {
+    if (!dataLines.length) {
+      return
+    }
+    const workflowEvent = parseWorkflowSseEvent(eventName, dataLines.join('\n'))
+    if (workflowEvent) {
+      workflowEvents.push(workflowEvent)
+    }
+    eventName = ''
+    dataLines = []
+  }
+
+  content.split(/\r?\n/).forEach((line) => {
+    if (!line.trim()) {
+      commitEvent()
+      return
+    }
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim()
+      return
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim())
+    }
+  })
+  commitEvent()
+
+  return workflowEvents
+}
+
+const buildWorkflowTimeline = (workflowEvents: WorkflowSseEvent[]) => {
+  const timeline = createWorkflowTimeline()
+  workflowEvents.forEach((workflowEvent) => {
+    applyWorkflowEvent(timeline, workflowEvent)
+  })
+  return timeline
+}
+
+const getWorkflowStatusText = (workflow?: WorkflowTimeline) => {
+  if (!workflow) return ''
+  if (workflow.status === 'completed') return '已完成'
+  if (workflow.status === 'error') return '失败'
+  if (workflow.status === 'stopped') return '已暂停'
+  return '进行中'
+}
+
+const getWorkflowTagColor = (workflow?: WorkflowTimeline) => {
+  if (!workflow) return 'default'
+  if (workflow.status === 'completed') return 'success'
+  if (workflow.status === 'error') return 'error'
+  if (workflow.status === 'stopped') return 'warning'
+  return 'processing'
+}
+
+const getWorkflowTitle = (workflow?: WorkflowTimeline) => {
+  if (!workflow) return ''
+  if (workflow.status === 'completed') return workflow.completedMessage || '工作流执行完成'
+  if (workflow.status === 'error') return workflow.error || '工作流执行失败'
+  if (workflow.status === 'stopped') return '已暂停生成'
+  return workflow.message || '代码生成工作流执行中'
 }
 
 const formatMessageTime = (time?: string) => {
@@ -159,6 +352,18 @@ const getHistoryRole = (messageType?: string): ChatMessage['role'] => {
 const toChatMessage = (history: API.ChatHistory): ChatMessage => {
   const role = getHistoryRole(history.messageType)
   const content = history.message || ''
+  const workflowEvents = role === 'assistant' ? parseWorkflowEventsFromContent(content) : []
+  if (workflowEvents.length) {
+    return {
+      role,
+      content,
+      createTime: history.createTime,
+      workflow: buildWorkflowTimeline(workflowEvents),
+      workflowEvents,
+      workflowGroupKey: history.parentId,
+    }
+  }
+
   return {
     role,
     content,
@@ -171,6 +376,36 @@ const sortHistoriesAsc = (records: API.ChatHistory[]) => {
   return [...records].sort((left, right) => {
     return new Date(left.createTime || '').getTime() - new Date(right.createTime || '').getTime()
   })
+}
+
+const compactWorkflowMessages = (chatMessages: ChatMessage[]) => {
+  return chatMessages.reduce<ChatMessage[]>((mergedMessages, chatMessage) => {
+    if (!chatMessage.workflow || !chatMessage.workflowEvents?.length) {
+      mergedMessages.push(chatMessage)
+      return mergedMessages
+    }
+
+    const previousMessage = mergedMessages[mergedMessages.length - 1]
+    const isSameWorkflow =
+      previousMessage?.workflow &&
+      previousMessage.workflowEvents &&
+      (!previousMessage.workflowGroupKey ||
+        !chatMessage.workflowGroupKey ||
+        previousMessage.workflowGroupKey === chatMessage.workflowGroupKey)
+
+    if (!isSameWorkflow) {
+      mergedMessages.push(chatMessage)
+      return mergedMessages
+    }
+
+    chatMessage.workflowEvents.forEach((workflowEvent) => {
+      applyWorkflowEvent(previousMessage.workflow!, workflowEvent)
+      previousMessage.workflowEvents!.push(workflowEvent)
+    })
+    previousMessage.content = [previousMessage.content, chatMessage.content].filter(Boolean).join('\n')
+    previousMessage.createTime = chatMessage.createTime || previousMessage.createTime
+    return mergedMessages
+  }, [])
 }
 
 const refreshHistoryCursor = () => {
@@ -212,6 +447,8 @@ const getGeneratedPreviewUrl = () => {
   return appInfo.value.codeGenType === CODE_GEN_TYPE_ENUM.VUE_PROJECT
     ? `${baseUrl}dist/index.html` : baseUrl
 }
+
+const isVueProjectPreview = () => appInfo.value.codeGenType === CODE_GEN_TYPE_ENUM.VUE_PROJECT
 
 let visualEditorController: VisualEditorController | undefined
 
@@ -294,11 +531,14 @@ const sleep = (ms: number) => {
 
 const resetStreamingContent = () => {
   streamingDraft = ''
+  streamingWorkflowEvents = []
   currentStreamingMessage.value = ''
+  currentWorkflowTimeline.value = undefined
   if (streamingFlushTimer) {
     window.clearTimeout(streamingFlushTimer)
     streamingFlushTimer = undefined
   }
+  streamingPaintPending = false
 }
 
 const flushStreamingContent = async () => {
@@ -308,8 +548,25 @@ const flushStreamingContent = async () => {
   scrollToBottom()
 }
 
+const scheduleStreamingPaint = () => {
+  if (streamingPaintPending) {
+    return
+  }
+
+  streamingPaintPending = true
+  void nextTick().then(() => {
+    window.requestAnimationFrame(() => {
+      streamingPaintPending = false
+      currentStreamingMessage.value = streamingDraft
+      scrollToBottom()
+    })
+  })
+}
+
 const appendStreamingContent = (text: string) => {
   streamingDraft += text
+  currentStreamingMessage.value = streamingDraft
+  scheduleStreamingPaint()
   if (streamingFlushTimer) {
     return
   }
@@ -318,10 +575,173 @@ const appendStreamingContent = (text: string) => {
     flushStreamingContent()
   }, 120)
 }
-// 检查预览是否准备就绪
-const checkPreviewReady = async (url: string) => {
-  // 如果预览未准备就绪，等待5秒后重试
-  // 如果5秒后仍未准备就绪，返回false
+
+const appendWorkflowStreamingEvent = async (workflowEvent: WorkflowSseEvent) => {
+  if (!currentWorkflowTimeline.value || workflowEvent.eventName === 'workflow_start') {
+    currentWorkflowTimeline.value = createWorkflowTimeline()
+  }
+  applyWorkflowEvent(currentWorkflowTimeline.value, workflowEvent)
+  streamingWorkflowEvents.push(workflowEvent)
+  await nextTick()
+  scrollToBottom()
+}
+
+const getGenerationTaskStorageKey = (id = appId.value) => {
+  return `${generationTaskStoragePrefix}${id}`
+}
+
+const getGenerationCursorStorageKey = (id = appId.value) => {
+  return `${generationCursorStoragePrefix}${id}`
+}
+
+const getStoredGenerationRequestId = () => {
+  if (!appId.value) {
+    return ''
+  }
+  return localStorage.getItem(getGenerationTaskStorageKey()) || ''
+}
+
+const getStoredGenerationCursor = () => {
+  if (!appId.value) {
+    return 0
+  }
+  const cursor = Number(localStorage.getItem(getGenerationCursorStorageKey()) || 0)
+  return Number.isFinite(cursor) && cursor > 0 ? cursor : 0
+}
+
+const saveGenerationTask = (requestId: string) => {
+  localStorage.setItem(getGenerationTaskStorageKey(), requestId)
+  localStorage.setItem(getGenerationCursorStorageKey(), '0')
+}
+
+const saveGenerationCursor = (cursor: number) => {
+  if (!appId.value || !Number.isFinite(cursor) || cursor <= 0) {
+    return
+  }
+  localStorage.setItem(getGenerationCursorStorageKey(), String(cursor))
+}
+
+const clearGenerationTask = (requestId?: string) => {
+  if (!appId.value) {
+    return
+  }
+  const storedRequestId = getStoredGenerationRequestId()
+  if (!requestId || !storedRequestId || storedRequestId === requestId) {
+    localStorage.removeItem(getGenerationTaskStorageKey())
+    localStorage.removeItem(getGenerationCursorStorageKey())
+  }
+}
+
+const keepStoppedStreamingContent = () => {
+  if (currentWorkflowTimeline.value && streamingWorkflowEvents.length) {
+    currentWorkflowTimeline.value.status = 'stopped'
+    messages.value.push({
+      role: 'assistant',
+      content: streamingWorkflowEvents
+        .map((workflowEvent) => `event:${workflowEvent.eventName}\ndata:${JSON.stringify(workflowEvent.data)}`)
+        .join('\n\n'),
+      createTime: new Date().toISOString(),
+      workflow: currentWorkflowTimeline.value,
+      workflowEvents: [...streamingWorkflowEvents],
+    })
+    resetStreamingContent()
+    return
+  }
+
+  const content = currentStreamingMessage.value || streamingDraft
+  if (!content) {
+    return
+  }
+
+  messages.value.push({
+    role: 'assistant',
+    content,
+    createTime: new Date().toISOString(),
+    html: renderMarkdown(content),
+  })
+  resetStreamingContent()
+}
+
+// 暂停当前 AI 回复：通知后端停止对应 requestId，并关闭浏览器端 SSE 读取。
+const stopGenerating = async () => {
+  if (!currentStreamRequestId.value || !appId.value || isStopping.value) {
+    return
+  }
+
+  const requestId = currentStreamRequestId.value
+  currentStreamStopRequested = true
+  isStopping.value = true
+
+  try {
+    await stopChatToGenCode({
+      appId: appId.value,
+      requestId,
+    })
+  } catch (error) {
+    message.warning('暂停请求可能未送达服务端')
+    console.error('Stop stream error:', error)
+  } finally {
+    clearGenerationTask(requestId)
+    keepStoppedStreamingContent()
+    currentStreamAbortController?.abort()
+    isLoading.value = false
+    isStreaming.value = false
+    isStopping.value = false
+  }
+}
+type PreviewReadyResult = {
+  ready: boolean
+  signature?: string
+}
+
+type LoadPreviewOptions = {
+  showLoading?: boolean
+}
+
+let previewLoadSeq = 0
+
+const hashPreviewContent = (content: string) => {
+  let hash = 0
+  for (let index = 0; index < content.length; index += 1) {
+    hash = Math.imul(31, hash) + content.charCodeAt(index)
+    hash |= 0
+  }
+  return `${content.length}:${hash}`
+}
+
+const collectPreviewAssetUrls = (html: string, baseUrl: string) => {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const previewUrlObject = new URL(baseUrl)
+  const assetElements = Array.from(
+    doc.querySelectorAll<HTMLScriptElement | HTMLLinkElement>(
+      'script[src],link[rel="stylesheet"][href],link[rel="modulepreload"][href]',
+    ),
+  )
+
+  return assetElements
+    .map((element) => element.getAttribute('src') || element.getAttribute('href'))
+    .filter((assetUrl): assetUrl is string => !!assetUrl && !assetUrl.startsWith('data:'))
+    .map((assetUrl) => new URL(assetUrl, baseUrl))
+    .filter((assetUrl) => assetUrl.origin === previewUrlObject.origin)
+    .map((assetUrl) => assetUrl.toString())
+}
+
+const checkAssetReady = async (url: string, signal: AbortSignal) => {
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      signal,
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+// 检查预览是否准备就绪。Vue 项目需要等新 dist/index.html 和其引用资源都落盘。
+const checkPreviewReady = async (url: string, previousSignature = ''): Promise<PreviewReadyResult> => {
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), 5000)
 
@@ -332,35 +752,85 @@ const checkPreviewReady = async (url: string) => {
       cache: 'no-store',
       signal: controller.signal,
     })
-    return response.ok
+    if (!response.ok) {
+      return { ready: false }
+    }
+    if (!isVueProjectPreview()) {
+      return { ready: true }
+    }
+
+    const html = await response.text()
+    const signature = hashPreviewContent(html)
+    if (previousSignature && signature === previousSignature) {
+      return { ready: false, signature }
+    }
+
+    const assetUrls = collectPreviewAssetUrls(html, url)
+    const assetsReady = await Promise.all(
+      assetUrls.map((assetUrl) => checkAssetReady(assetUrl, controller.signal)),
+    )
+    return {
+      ready: assetsReady.every(Boolean),
+      signature,
+    }
   } catch {
-    return false
+    return { ready: false }
   } finally {
     window.clearTimeout(timer)
   }
 }
 // 加载生成的预览
-const loadGeneratedPreview = async () => {
+const normalizeLoadPreviewOptions = (
+  options: boolean | LoadPreviewOptions = {},
+): Required<LoadPreviewOptions> => {
+  if (typeof options === 'boolean') {
+    return {
+      showLoading: true,
+    }
+  }
+
+  return {
+    showLoading: options.showLoading ?? true,
+  }
+}
+
+const loadGeneratedPreview = async (options: boolean | LoadPreviewOptions = {}) => {
   //
   if (!appInfo.value.codeGenType) {
     return false
   }
 
+  const loadSeq = ++previewLoadSeq
   const url = getGeneratedPreviewUrl()
-  previewStatus.value = 'loading'
+  const { showLoading } = normalizeLoadPreviewOptions(options)
+  const shouldShowLoading = showLoading || !previewUrl.value
+  const previousStatus = previewStatus.value
+  if (shouldShowLoading) {
+    previewStatus.value = 'loading'
+  }
+  const maxAttempts = isVueProjectPreview() ? 45 : 10
 
-  for (let index = 0; index < 10; index += 1) {
-    const ready = await checkPreviewReady(url)
-    if (ready) {
+  for (let index = 0; index < maxAttempts; index += 1) {
+    if (loadSeq !== previewLoadSeq) {
+      return false
+    }
+    const result = await checkPreviewReady(url)
+    if (result.ready) {
+      if (loadSeq !== previewLoadSeq) {
+        return false
+      }
+      currentPreviewSignature = result.signature || currentPreviewSignature
       previewUrl.value = `${url}?t=${Date.now()}`
       previewFrameKey.value += 1
       previewStatus.value = 'ready'
       return true
     }
-    await sleep(600)
+    await sleep(isVueProjectPreview() ? 1000 : 600)
   }
 
-  previewStatus.value = 'error'
+  if (loadSeq === previewLoadSeq) {
+    previewStatus.value = shouldShowLoading ? 'error' : previousStatus
+  }
   return false
 }
 
@@ -369,15 +839,20 @@ const restoreGeneratedPreview = async () => {
     return false
   }
 
-  const ready = await checkPreviewReady(getGeneratedPreviewUrl())
-  if (!ready) {
+  const result = await checkPreviewReady(getGeneratedPreviewUrl())
+  if (!result.ready) {
     return false
   }
 
+  currentPreviewSignature = result.signature || currentPreviewSignature
   previewUrl.value = `${getGeneratedPreviewUrl()}?t=${Date.now()}`
   previewFrameKey.value += 1
   previewStatus.value = 'ready'
   return true
+}
+
+const isBuildCompleted = (app?: API.App | API.AppVO) => {
+  return app?.isBuilderComplete === true
 }
 
 const consumePendingPrompt = () => {
@@ -399,7 +874,14 @@ const getSseMessageContent = (rawData: string) => {
     if (typeof parsed === 'string') {
       return parsed
     }
-    return parsed?.d ?? parsed?.content ?? parsed?.text ?? ''
+    if (parsed?.type === 'tool_request') {
+      const toolName = parsed.name || '工具'
+      return `\n\n[工具调用] ${toolName}\n`
+    }
+    if (parsed?.type === 'tool_executed') {
+      return parsed.result || parsed.data || ''
+    }
+    return parsed?.d ?? parsed?.data ?? parsed?.content ?? parsed?.text ?? ''
   } catch {
     return rawData
   }
@@ -461,8 +943,10 @@ const loadHistory = async (loadMore = false) => {
     if (res.data.code === 0 && res.data.data) {
       historyTotal.value = res.data.data.totalRow ?? 0
       const records = sortHistoriesAsc(res.data.data.records ?? [])
-      const historyMessages = records.map(toChatMessage)
-      messages.value = loadMore ? [...historyMessages, ...messages.value] : historyMessages
+      const historyMessages = compactWorkflowMessages(records.map(toChatMessage))
+      messages.value = compactWorkflowMessages(
+        loadMore ? [...historyMessages, ...messages.value] : historyMessages,
+      )
       refreshHistoryCursor()
       refreshHasMoreHistory(records.length)
       historyLoaded.value = true
@@ -505,12 +989,359 @@ const fetchAppInfo = async () => {
       await restoreGeneratedPreview()
     }
 
+    const activeRequestId = getStoredGenerationRequestId()
+    if (activeRequestId) {
+      await resumeGenerationTask(activeRequestId)
+      return
+    }
+
     const pendingPrompt = consumePendingPrompt()
     const autoPrompt = pendingPrompt || appInfo.value.initPrompt || ''
     if (autoPrompt && canChat.value && messages.value.length === 0) {
       await sendMessage(autoPrompt)
     }
   }
+}
+
+const refreshAppInfoForPreview = async (options: boolean | LoadPreviewOptions = {}) => {
+  if (!appId.value) return false
+  const refreshSeq = ++previewRefreshSeq
+  const loadPreviewOptions = normalizeLoadPreviewOptions(options)
+  const shouldShowLoading = loadPreviewOptions.showLoading || !previewUrl.value
+  const previousStatus = previewStatus.value
+
+  if (shouldShowLoading) {
+    previewStatus.value = 'loading'
+  }
+
+  for (let index = 0; index < 45; index += 1) {
+    if (refreshSeq !== previewRefreshSeq) {
+      return false
+    }
+    const res = await fetchCurrentAppInfo()
+    if (res.data.code === 0 && res.data.data) {
+      appInfo.value = res.data.data
+
+      if (appInfo.value.codeGenType && isBuildCompleted(appInfo.value)) {
+        return loadGeneratedPreview(loadPreviewOptions)
+      }
+    }
+    await sleep(1000)
+  }
+
+  if (shouldShowLoading) {
+    previewStatus.value = previewUrl.value ? previousStatus : 'error'
+  }
+  return false
+}
+
+const refreshPreviewInBackground = (refreshTask: () => Promise<boolean>) => {
+  if (previewRefreshPromise) {
+    return
+  }
+  previewRefreshPromise = refreshTask()
+  void previewRefreshPromise.catch((error) => {
+    console.error('Refresh preview error:', error)
+    if (!previewUrl.value) {
+      previewStatus.value = 'error'
+    }
+  }).finally(() => {
+    previewRefreshPromise = undefined
+  })
+}
+
+const createPreviewRefreshAfterAiReplyTask = () => {
+  return () => refreshAppInfoForPreview({ showLoading: !previewUrl.value })
+}
+
+type GenerationStreamStatus = 'done' | 'error' | 'stopped' | 'disconnected'
+
+const parseGenerationEventContent = async (eventName: string, rawData: string) => {
+  const workflowEvents = parseWorkflowEventsFromContent(rawData)
+  if (workflowEvents.length) {
+    for (const workflowEvent of workflowEvents) {
+      await appendWorkflowStreamingEvent(workflowEvent)
+    }
+    return
+  }
+
+  const text = getSseMessageContent(rawData)
+  const nestedWorkflowEvents = parseWorkflowEventsFromContent(text)
+  if (nestedWorkflowEvents.length) {
+    for (const workflowEvent of nestedWorkflowEvents) {
+      await appendWorkflowStreamingEvent(workflowEvent)
+    }
+    return
+  }
+
+  if (text && eventName !== 'workflow_step') {
+    appendStreamingContent(text)
+  }
+}
+
+const handleGenerationErrorEvent = (rawData: string) => {
+  let errorMessage = '生成过程中出现错误'
+  try {
+    const errorData = JSON.parse(rawData) as BusinessErrorPayload
+    errorMessage = errorData.message || errorMessage
+  } catch {
+    if (rawData.trim()) {
+      errorMessage = rawData
+    }
+  }
+
+  streamingDraft = `❌ ${errorMessage}`
+  streamingWorkflowEvents = []
+  currentWorkflowTimeline.value = undefined
+  currentStreamingMessage.value = streamingDraft
+  message.error(errorMessage)
+}
+
+const commitStreamingMessage = () => {
+  if (currentWorkflowTimeline.value && streamingWorkflowEvents.length) {
+    if (currentStreamStopRequested) {
+      currentWorkflowTimeline.value.status = 'stopped'
+    }
+    const shouldRefreshAppPreview = currentWorkflowTimeline.value.status === 'completed'
+    messages.value.push({
+      role: 'assistant',
+      content: streamingWorkflowEvents
+        .map((workflowEvent) => `event:${workflowEvent.eventName}\ndata:${JSON.stringify(workflowEvent.data)}`)
+        .join('\n\n'),
+      createTime: new Date().toISOString(),
+      workflow: currentWorkflowTimeline.value,
+      workflowEvents: [...streamingWorkflowEvents],
+    })
+    resetStreamingContent()
+    return shouldRefreshAppPreview
+  }
+
+  if (streamingFlushTimer) {
+    window.clearTimeout(streamingFlushTimer)
+    streamingFlushTimer = undefined
+  }
+  currentStreamingMessage.value = streamingDraft
+  if (!currentStreamingMessage.value) {
+    return false
+  }
+
+  const content = currentStreamingMessage.value
+  messages.value.push({
+    role: 'assistant',
+    content,
+    createTime: new Date().toISOString(),
+    html: renderMarkdown(content),
+  })
+  resetStreamingContent()
+  return !currentStreamStopRequested && !content.startsWith('❌')
+}
+
+const consumeGenerationConnection = async (
+  requestId: string,
+): Promise<GenerationStreamStatus> => {
+  const streamAbortController = new AbortController()
+  currentStreamAbortController = streamAbortController
+  const url = createApiUrl('/app/chat/gen/stream')
+  url.searchParams.set('requestId', requestId)
+  const lastEventId = getStoredGenerationCursor()
+
+  const response = await fetch(url.toString(), {
+    credentials: 'include',
+    signal: streamAbortController.signal,
+    headers: lastEventId > 0 ? { 'Last-Event-ID': String(lastEventId) } : undefined,
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`SSE request failed: ${response.status}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent = 'message'
+  let currentEventId = ''
+  let dataLines: string[] = []
+  let terminalStatus: GenerationStreamStatus = 'disconnected'
+
+  const resetEventFrame = () => {
+    currentEvent = 'message'
+    currentEventId = ''
+    dataLines = []
+  }
+
+  const dispatchEventFrame = async () => {
+    if (!dataLines.length && !currentEventId) {
+      resetEventFrame()
+      return
+    }
+
+    const rawData = dataLines.join('\n')
+    const eventId = Number(currentEventId)
+    if (Number.isFinite(eventId) && eventId > 0) {
+      saveGenerationCursor(eventId)
+    }
+
+    if (currentEvent === 'done') {
+      terminalStatus = 'done'
+    } else if (currentEvent === 'stopped') {
+      currentStreamStopRequested = true
+      terminalStatus = 'stopped'
+    } else if (currentEvent === 'error' || currentEvent === 'business-error') {
+      handleGenerationErrorEvent(rawData)
+      terminalStatus = 'error'
+    } else {
+      await parseGenerationEventContent(currentEvent, rawData)
+    }
+
+    resetEventFrame()
+  }
+
+  const processLine = async (line: string) => {
+    if (!line || line.startsWith(':')) {
+      if (!line) {
+        await dispatchEventFrame()
+      }
+      return
+    }
+    if (line.startsWith('event:')) {
+      currentEvent = line.slice(6).trim() || 'message'
+      return
+    }
+    if (line.startsWith('id:')) {
+      currentEventId = line.slice(3).trim()
+      return
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).replace(/^ /, ''))
+    }
+  }
+
+  try {
+    while (!terminalStatus || terminalStatus === 'disconnected') {
+      const { done, value } = await reader.read()
+      if (done) {
+        buffer += decoder.decode()
+        break
+      }
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        await processLine(line.replace(/\r$/, ''))
+        if (terminalStatus !== 'disconnected') {
+          break
+        }
+      }
+      if (terminalStatus !== 'disconnected') {
+        await reader.cancel().catch(() => undefined)
+        break
+      }
+    }
+
+    if (buffer) {
+      // 服务端断开时，最后一个数据块不一定以空行结尾，需要把其中的每一行补处理完。
+      const trailingLines = buffer.split(/\r?\n/)
+      buffer = ''
+      for (const line of trailingLines) {
+        await processLine(line)
+        if (terminalStatus !== 'disconnected') {
+          break
+        }
+      }
+    }
+    if (dataLines.length || currentEventId) {
+      await dispatchEventFrame()
+    }
+  } finally {
+    if (currentStreamAbortController === streamAbortController) {
+      currentStreamAbortController = undefined
+    }
+  }
+
+  return terminalStatus
+}
+
+const consumeGenerationStream = async (requestId: string): Promise<GenerationStreamStatus> => {
+  while (!isPageUnmounting && currentStreamRequestId.value === requestId) {
+    try {
+      const status = await consumeGenerationConnection(requestId)
+      if (status !== 'disconnected') {
+        return status
+      }
+    } catch (error) {
+      if (currentStreamStopRequested || (error instanceof DOMException && error.name === 'AbortError')) {
+        return currentStreamStopRequested ? 'stopped' : 'disconnected'
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      if (errorMessage.includes('SSE request failed: 404')) {
+        clearGenerationTask(requestId)
+        return 'error'
+      }
+      console.warn('Generation SSE disconnected, retrying:', error)
+    }
+
+    if (!isPageUnmounting && !currentStreamStopRequested) {
+      await sleep(1000)
+    }
+  }
+
+  return currentStreamStopRequested ? 'stopped' : 'disconnected'
+}
+
+const runGenerationStream = async (requestId: string) => {
+  let previewRefreshTask: (() => Promise<boolean>) | undefined
+  try {
+    const status = await consumeGenerationStream(requestId)
+    if (status === 'disconnected' || isPageUnmounting) {
+      return
+    }
+
+    if (status === 'stopped' && currentWorkflowTimeline.value) {
+      currentWorkflowTimeline.value.status = 'stopped'
+    }
+    const shouldRefreshAppPreview = commitStreamingMessage()
+    clearGenerationTask(requestId)
+
+    if (shouldRefreshAppPreview) {
+      previewRefreshTask = createPreviewRefreshAfterAiReplyTask()
+    }
+    await loadHistory()
+  } catch (error) {
+    if (!currentStreamStopRequested) {
+      message.error('对话请求失败')
+      console.error('Chat error:', error)
+    }
+  } finally {
+    if (!isPageUnmounting) {
+      isLoading.value = false
+      isStreaming.value = false
+      isStopping.value = false
+      currentStreamAbortController = undefined
+      if (currentStreamRequestId.value === requestId) {
+        currentStreamRequestId.value = ''
+      }
+      currentStreamStopRequested = false
+      if (previewRefreshTask) {
+        refreshPreviewInBackground(previewRefreshTask)
+      }
+    }
+  }
+}
+
+const resumeGenerationTask = async (requestId: string) => {
+  if (!requestId || isLoading.value) {
+    return false
+  }
+
+  isLoading.value = true
+  isStreaming.value = true
+  isStopping.value = false
+  currentStreamStopRequested = false
+  currentStreamRequestId.value = requestId
+  resetStreamingContent()
+  void runGenerationStream(requestId)
+  return true
 }
 
 // 发送消息
@@ -522,80 +1353,38 @@ const sendMessage = async (content: string) => {
   if (!content.trim() || isLoading.value) return
   const requestContent = buildPromptWithSelectedElement(content)
 
-  // 添加用户消息
   messages.value.push({ role: 'user', content: requestContent, createTime: new Date().toISOString() })
   userInput.value = ''
   exitVisualEditMode()
 
-  // 滚动到底部
   await nextTick()
   scrollToBottom()
 
-  // 开始流式请求
   isLoading.value = true
   isStreaming.value = true
-  previewStatus.value = 'idle'
+  isStopping.value = false
+  currentStreamStopRequested = false
   resetStreamingContent()
 
   try {
-    const url = createApiUrl('/app/chat/gen/code')
-    url.searchParams.set('appId', String(appId.value))
-    url.searchParams.set('message', requestContent)
-    const response = await fetch(url.toString(), {
-      credentials: 'include',
+    const res = await startGenerationTask({
+      appId: appId.value,
+      message: requestContent,
     })
-    if (!response.ok || !response.body) {
-      throw new Error(`SSE request failed: ${response.status}`)
-    }
-    const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      // 按行解析 SSE 数据
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        if (line.startsWith('data:')) {
-          const rawData = line.slice(5).trim()
-          const text = getSseMessageContent(rawData)
-          if (text) {
-            appendStreamingContent(text)
-          }
-        } else if (line.startsWith('event:done')) {
-          // 流结束
-        }
-      }
+    if (res.data.code !== 0 || !res.data.data) {
+      throw new Error(res.data.message || '启动生成任务失败')
     }
 
-    if (streamingFlushTimer) {
-      window.clearTimeout(streamingFlushTimer)
-      streamingFlushTimer = undefined
-    }
-    currentStreamingMessage.value = streamingDraft
-
-    // 添加AI回复
-    if (currentStreamingMessage.value) {
-      const content = currentStreamingMessage.value
-      messages.value.push({
-        role: 'assistant',
-        content,
-        createTime: new Date().toISOString(),
-        html: renderMarkdown(content),
-      })
-      resetStreamingContent()
-
-      await loadGeneratedPreview()
-    }
+    const requestId = res.data.data
+    saveGenerationTask(requestId)
+    currentStreamRequestId.value = requestId
+    void runGenerationStream(requestId)
   } catch (error) {
-    message.error('对话请求失败')
-    console.error('Chat error:', error)
-  } finally {
     isLoading.value = false
     isStreaming.value = false
+    currentStreamRequestId.value = ''
+    message.error(error instanceof Error ? error.message : '启动生成任务失败')
+    console.error('Start generation error:', error)
   }
 }
 
@@ -747,11 +1536,15 @@ const scrollToBottom = () => {
 }
 
 onMounted(() => {
+  isPageUnmounting = false
   window.addEventListener('message', handleVisualEditorMessage)
   fetchAppInfo()
 })
 
 onBeforeUnmount(() => {
+  isPageUnmounting = true
+  currentStreamAbortController?.abort()
+  previewRefreshSeq += 1
   window.removeEventListener('message', handleVisualEditorMessage)
   visualEditorController?.destroy()
 })
@@ -859,14 +1652,50 @@ watch(previewStatus, (status) => {
             :class="['message', msg.role]"
           >
             <div class="message-avatar">
-              <a-avatar v-if="msg.role === 'user'" :size="32">
-                <template #icon><UserOutlined /></template>
+              <a-avatar
+                v-if="msg.role === 'user'"
+                :size="32"
+                :style="getAvatarStyle(loginUserStore.loginUser.userName)"
+                class="user-message-avatar"
+              >
+                {{ getAvatarText(loginUserStore.loginUser.userName) }}
               </a-avatar>
               <a-avatar v-else :size="32" :src="aiAvatar" />
             </div>
             <div class="message-content">
+              <div v-if="msg.workflow" class="workflow-card">
+                <div class="workflow-header">
+                  <div>
+                    <div class="workflow-title">{{ getWorkflowTitle(msg.workflow) }}</div>
+                    <div v-if="msg.workflow.originalPrompt" class="workflow-prompt">
+                      {{ msg.workflow.originalPrompt }}
+                    </div>
+                  </div>
+                  <a-tag :color="getWorkflowTagColor(msg.workflow)">
+                    {{ getWorkflowStatusText(msg.workflow) }}
+                  </a-tag>
+                </div>
+                <div class="workflow-steps">
+                  <div
+                    v-for="step in msg.workflow.steps"
+                    :key="step.stepNumber"
+                    class="workflow-step completed"
+                  >
+                    <div class="workflow-step-marker">
+                      <CheckCircleOutlined />
+                    </div>
+                    <div class="workflow-step-body">
+                      <span class="workflow-step-number">第 {{ step.stepNumber }} 步</span>
+                      <span class="workflow-step-title">{{ step.title }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="msg.workflow.error" class="workflow-error">
+                  {{ msg.workflow.error }}
+                </div>
+              </div>
               <div
-                v-if="msg.role === 'assistant'"
+                v-else-if="msg.role === 'assistant'"
                 class="message-text markdown-body"
                 v-html="msg.html || renderMarkdown(msg.content)"
               />
@@ -887,8 +1716,55 @@ watch(previewStatus, (status) => {
             </div>
           </div>
 
+          <div v-if="isStreaming && currentWorkflowTimeline" class="message assistant">
+            <div class="message-avatar">
+              <a-avatar :size="32" :src="aiAvatar" />
+            </div>
+            <div class="message-content">
+              <div class="workflow-card streaming-workflow">
+                <div class="workflow-header">
+                  <div>
+                    <div class="workflow-title">{{ getWorkflowTitle(currentWorkflowTimeline) }}</div>
+                    <div v-if="currentWorkflowTimeline.originalPrompt" class="workflow-prompt">
+                      {{ currentWorkflowTimeline.originalPrompt }}
+                    </div>
+                  </div>
+                  <a-tag :color="getWorkflowTagColor(currentWorkflowTimeline)">
+                    {{ getWorkflowStatusText(currentWorkflowTimeline) }}
+                  </a-tag>
+                </div>
+                <div class="workflow-steps">
+                  <div
+                    v-for="step in currentWorkflowTimeline.steps"
+                    :key="step.stepNumber"
+                    class="workflow-step completed"
+                  >
+                    <div class="workflow-step-marker">
+                      <CheckCircleOutlined />
+                    </div>
+                    <div class="workflow-step-body">
+                      <span class="workflow-step-number">第 {{ step.stepNumber }} 步</span>
+                      <span class="workflow-step-title">{{ step.title }}</span>
+                    </div>
+                  </div>
+                  <div v-if="currentWorkflowTimeline.status === 'running'" class="workflow-step running">
+                    <div class="workflow-step-marker">
+                      <a-spin size="small" />
+                    </div>
+                    <div class="workflow-step-body">
+                      <span class="workflow-step-title">正在推进下一步...</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="currentWorkflowTimeline.error" class="workflow-error">
+                  {{ currentWorkflowTimeline.error }}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 加载状态 -->
-          <div v-if="isLoading && !isStreaming" class="message assistant">
+          <div v-if="isLoading && !isStreaming && !currentWorkflowTimeline" class="message assistant">
             <div class="message-avatar">
               <a-avatar :size="32" :src="aiAvatar" />
             </div>
@@ -945,9 +1821,20 @@ watch(previewStatus, (status) => {
                   {{ isVisualEditMode ? '退出编辑' : '编辑模式' }}
                 </a-button>
                 <a-button
+                  v-if="isLoading"
+                  danger
+                  shape="circle"
+                  :loading="isStopping"
+                  :disabled="!canChat"
+                  @click="stopGenerating"
+                >
+                  <template #icon><PauseCircleOutlined /></template>
+                </a-button>
+                <a-button
+                  v-else
                   type="primary"
                   shape="circle"
-                  :disabled="!userInput.trim() || isLoading || !canChat"
+                  :disabled="!userInput.trim() || !canChat"
                   @click="sendMessage(userInput)"
                 >
                   <template #icon><SendOutlined /></template>
@@ -1146,6 +2033,10 @@ watch(previewStatus, (status) => {
   flex-shrink: 0;
 }
 
+.user-message-avatar {
+  font-weight: 500;
+}
+
 .message-content {
   grid-column: 2;
   max-width: 100%;
@@ -1191,6 +2082,123 @@ watch(previewStatus, (status) => {
 .message.user .message-time {
   color: rgba(255, 255, 255, 0.72);
   text-align: right;
+}
+
+.workflow-card {
+  min-width: min(420px, 100%);
+}
+
+.workflow-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.workflow-title {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.workflow-prompt {
+  display: -webkit-box;
+  margin-top: 4px;
+  max-width: 520px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.workflow-steps {
+  margin-top: 12px;
+}
+
+.workflow-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.workflow-step:last-child {
+  padding-bottom: 0;
+}
+
+.workflow-step::before {
+  position: absolute;
+  top: 24px;
+  bottom: 0;
+  left: 11px;
+  width: 1px;
+  background: #dbeafe;
+  content: '';
+}
+
+.workflow-step:last-child::before {
+  display: none;
+}
+
+.workflow-step-marker {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: #1677ff;
+  background: #eff6ff;
+  border-radius: 50%;
+}
+
+.workflow-step.running .workflow-step-marker {
+  background: #f8fafc;
+}
+
+.workflow-step-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.workflow-step-number {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.workflow-step-title {
+  min-width: 0;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.workflow-error {
+  margin-top: 12px;
+  padding: 8px 10px;
+  color: #cf1322;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  border-radius: 8px;
+}
+
+.streaming-workflow {
+  padding-right: 4px;
 }
 
 .streaming-text {

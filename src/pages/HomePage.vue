@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { PaperClipOutlined, SendOutlined } from '@ant-design/icons-vue'
+import { PaperClipOutlined, SendOutlined, SwapOutlined } from '@ant-design/icons-vue'
 import { addApp, listAppVoByPage, listMyAppVoByPage, listFeaturedAppVoByPage } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import ACCESS_ENUM from '@/access/accessEnum'
@@ -17,19 +17,30 @@ const myAppsTitle = computed(() => (isAdmin.value ? '全部作品' : '我的作�
 
 // 提示词输入
 const prompt = ref('')
+const isAgentModel = ref(false)
+const isCreatingApp = ref(false)
 
 // 推荐关键词列表
 const recommendKeywords = [
-  '个人博客网站',
-  'AI SaaS 官网',
-  '电商运营后台',
-  '在线课程落地页',
-  '咖啡品牌官网',
+  'AI 简历优化助手',
+  '短视频脚本生成器',
+  '个人作品集网站',
+  '独立开发者产品官网',
+  '小红书选题日历',
+  '跨境电商运营看板',
+  '健身饮食打卡工具',
+  '旅行行程规划器',
+  '在线课程学习计划表',
+  '咖啡品牌预约点单页',
 ]
 
 // 使用推荐关键词填充输入框
 const useKeyword = (keyword: string) => {
   prompt.value = keyword
+}
+
+const toggleAgentModel = () => {
+  isAgentModel.value = !isAgentModel.value
 }
 
 // 我的应用数据
@@ -50,6 +61,9 @@ const featuredAppsParams = reactive<API.AppUserQueryRequest>({
 
 // 创建应用
 const handleCreateApp = async () => {
+  if (isCreatingApp.value) {
+    return
+  }
   if (!prompt.value.trim()) {
     message.warning('请输入提示词')
     return
@@ -60,14 +74,19 @@ const handleCreateApp = async () => {
     return
   }
   const initPrompt = prompt.value.trim()
-  const res = await addApp({ initPrompt })
-  if (res.data.code === 0 && res.data.data) {
-    const appId = String(res.data.data)
-    sessionStorage.setItem(`${pendingPromptStoragePrefix}${appId}`, initPrompt)
-    message.success('应用创建成功')
-    router.push(`/app/chat/${appId}`)
-  } else {
-    message.error('创建失败：' + res.data.message)
+  isCreatingApp.value = true
+  try {
+    const res = await addApp({ initPrompt, isAgentModel: isAgentModel.value })
+    if (res.data.code === 0 && res.data.data) {
+      const appId = String(res.data.data)
+      sessionStorage.setItem(`${pendingPromptStoragePrefix}${appId}`, initPrompt)
+      message.success('应用创建成功')
+      router.push(`/app/chat/${appId}`)
+    } else {
+      message.error('创建失败：' + res.data.message)
+    }
+  } finally {
+    isCreatingApp.value = false
   }
 }
 
@@ -147,11 +166,23 @@ onMounted(async () => {
                 <template #icon><PaperClipOutlined /></template>
                 上传
               </a-button>
+              <a-tooltip :title="isAgentModel ? '切换为 AI 对话模式' : '切换为 AI Agent 工作流模式'">
+                <a-button
+                  type="text"
+                  class="mode-toggle-button"
+                  :class="{ active: isAgentModel }"
+                  @click="toggleAgentModel"
+                >
+                  <template #icon><SwapOutlined /></template>
+                  {{ isAgentModel ? 'Agent 工作流' : 'AI 对话' }}
+                </a-button>
+              </a-tooltip>
             </div>
             <a-button 
               type="primary" 
               shape="circle" 
-              :disabled="!prompt.trim()"
+              :disabled="!prompt.trim() || isCreatingApp"
+              :loading="isCreatingApp"
               @click="handleCreateApp"
             >
               <template #icon><SendOutlined /></template>
@@ -302,7 +333,19 @@ onMounted(async () => {
 
 .action-buttons {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.mode-toggle-button {
+  color: #475569;
+  border-radius: 16px;
+  transition: all 0.2s;
+}
+
+.mode-toggle-button.active {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.1);
 }
 
 .recommend-keywords {

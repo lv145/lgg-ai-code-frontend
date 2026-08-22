@@ -17,6 +17,20 @@ export async function addApp(
   });
 }
 
+/** 启动后台生成任务 POST /app/chat/gen/task */
+export async function startGenerationTask(
+  params: API.startGenerationTaskParams,
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseString>("/app/chat/gen/task", {
+    method: "POST",
+    params: {
+      ...params,
+    },
+    ...(options || {}),
+  });
+}
+
 /** 此处后端没有提供注释 POST /app/admin/delete */
 export async function adminDeleteApp(
   body: API.DeleteRequest,
@@ -58,6 +72,21 @@ export async function chatToGenCode(
     params: {
       ...params,
     },
+    ...(options || {}),
+  });
+}
+
+/** 停止某一次流式生成 POST /app/chat/gen/code/stop */
+export async function stopChatToGenCode(
+  body: API.StreamStopRequest,
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseBoolean>("/app/chat/gen/code/stop", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    data: body,
     ...(options || {}),
   });
 }

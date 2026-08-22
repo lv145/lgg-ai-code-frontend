@@ -5,6 +5,7 @@ declare namespace API {
     cover?: string;
     initPrompt?: string;
     codeGenType?: string;
+    isBuilderComplete?: boolean;
     deployKey?: string;
     deployedTime?: string;
     priority?: number;
@@ -12,11 +13,13 @@ declare namespace API {
     editTime?: string;
     createTime?: string;
     updateTime?: string;
+    isAgentModel?: boolean;
     isDelete?: number;
   };
 
   type AppAddRequest = {
     initPrompt?: string;
+    isAgentModel?: boolean;
   };
 
   type AppAdminUpdateRequest = {
@@ -64,6 +67,7 @@ declare namespace API {
     cover?: string;
     initPrompt?: string;
     codeGenType?: string;
+    isBuilderComplete?: boolean;
     deployKey?: string;
     deployedTime?: string;
     priority?: number;
@@ -150,6 +154,17 @@ declare namespace API {
     parentId?: string;
   };
 
+  type ChatHistoryOriginal = {
+    id?: string;
+    message?: string;
+    messageType?: string;
+    appId?: string;
+    userId?: string;
+    createTime?: string;
+    updateTime?: string;
+    isDelete?: number;
+  };
+
   type ChatHistoryQueryRequest = {
     pageNum?: number;
     pageSize?: number;
@@ -166,6 +181,7 @@ declare namespace API {
   type chatToGenCodeParams = {
     appId: string;
     message: string;
+    requestId: string;
   };
 
   type DeleteRequest = {
@@ -181,6 +197,10 @@ declare namespace API {
   };
 
   type getAppVOByIdParams = {
+    id: string;
+  };
+
+  type getInfoParams = {
     id: string;
   };
 
@@ -227,6 +247,19 @@ declare namespace API {
     optimizeCountQuery?: boolean;
   };
 
+  type PageChatHistoryOriginal = {
+    records?: ChatHistoryOriginal[];
+    pageNumber?: number;
+    pageSize?: number;
+    totalPage?: number;
+    totalRow?: number;
+    optimizeCountQuery?: boolean;
+  };
+
+  type pageParams = {
+    page: PageChatHistoryOriginal;
+  };
+
   type PageUserVO = {
     records?: UserVO[];
     pageNumber?: number;
@@ -236,7 +269,21 @@ declare namespace API {
     optimizeCountQuery?: boolean;
   };
 
+  type removeParams = {
+    id: string;
+  };
+
   type ServerSentEventString = true;
+
+  type startGenerationTaskParams = {
+    appId: string;
+    message: string;
+  };
+
+  type StreamStopRequest = {
+    appId?: string;
+    requestId?: string;
+  };
 
   type serveStaticResourceParams = {
     deployKey: string;
@@ -288,6 +335,7 @@ declare namespace API {
 
   type UserRegisterRequest = {
     userAccount?: string;
+    userName?: string;
     userPassword?: string;
     checkPassword?: string;
   };

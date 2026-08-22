@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { AppstoreOutlined, StarOutlined } from '@ant-design/icons-vue'
-import defaultAvatar from '@/assets/aiAvatar.png'
+import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
 
 const props = withDefaults(
   defineProps<{
@@ -24,13 +24,6 @@ const creatorName = computed(() => {
     return props.currentUser.userName || '无名'
   }
   return props.app.userId ? `用户 ${props.app.userId}` : '无名'
-})
-
-const creatorAvatar = computed(() => {
-  if (props.currentUser?.id && String(props.currentUser.id) === String(props.app.userId)) {
-    return props.currentUser.userAvatar || defaultAvatar
-  }
-  return defaultAvatar
 })
 
 const footerText = computed(() => {
@@ -58,8 +51,12 @@ const formatTime = (time: string) => {
 <template>
   <div class="app-card">
     <div class="app-header">
-      <a-avatar :src="creatorAvatar" :size="44" class="app-creator-avatar">
-        {{ creatorName.slice(0, 1) }}
+      <a-avatar
+        :size="44"
+        :style="getAvatarStyle(creatorName)"
+        class="app-creator-avatar"
+      >
+        {{ getAvatarText(creatorName) }}
       </a-avatar>
       <div class="app-meta">
         <h3 class="app-name">{{ app.appName }}</h3>
@@ -115,6 +112,8 @@ const formatTime = (time: string) => {
 
 .app-creator-avatar {
   flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .app-meta {

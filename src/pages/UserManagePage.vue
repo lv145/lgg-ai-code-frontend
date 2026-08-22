@@ -36,7 +36,9 @@
 
     <template #bodyCell="{ column, record }">
       <template v-if="column.dataIndex === 'userAvatar'">
-        <a-image :src="record.userAvatar" :width="120" />
+        <a-avatar :size="48" :style="getAvatarStyle(record.userName)" class="user-avatar">
+          {{ getAvatarText(record.userName) }}
+        </a-avatar>
       </template>
       <template v-else-if="column.dataIndex === 'userRole'">
         <div v-if="record.userRole === 'admin'">
@@ -63,6 +65,7 @@ import { onMounted, ref, reactive } from 'vue'
 import {deleteUser, listUserVoByPage } from '@/api/userController'
 import dayjs from "dayjs";
 import { computed } from "vue";
+import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
 
 // 数据
 const data = ref<API.UserVO[]>([])
@@ -170,5 +173,13 @@ const columns = [
 
 
 <style scoped>
+#userManagePage {
+  padding: 24px;
+}
+
+.user-avatar {
+  font-size: 20px;
+  font-weight: 500;
+}
 
 </style>

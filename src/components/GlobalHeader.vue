@@ -9,6 +9,7 @@ import logoUrl from '@/assets/logo.png'
 import { useLoginUserStore } from '@/stores/loginUser.ts'
 import { userLogout } from "@/api/userController.ts"
 import { message } from 'ant-design-vue'
+import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
 const loginUserStore = useLoginUserStore()
 const siteTitle = 'AI 零代码生成平台'
 const router = useRouter()
@@ -108,7 +109,12 @@ const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
         <div v-if="loginUserStore.loginUser.id">
           <a-dropdown>
             <a-space>
-              <a-avatar :src="loginUserStore.loginUser.userAvatar" />
+              <a-avatar
+                :style="getAvatarStyle(loginUserStore.loginUser.userName)"
+                class="header-avatar"
+              >
+                {{ getAvatarText(loginUserStore.loginUser.userName) }}
+              </a-avatar>
               {{ loginUserStore.loginUser.userName ?? '无名' }}
             </a-space>
             <template #overlay>
@@ -202,6 +208,10 @@ const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
   align-items: center;
   flex-shrink: 0;
   margin-left: 16px;
+}
+
+.header-avatar {
+  font-weight: 500;
 }
 
 .mobile-menu-trigger {

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons-vue'
 import { getCodeGenTypeLabel } from '@/constants/codeGenType'
+import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
 
 const props = defineProps<{
   open: boolean
@@ -52,8 +53,8 @@ const formatDate = (dateStr?: string) => {
           <div class="detail-label">创建者：</div>
           <div class="detail-content">
             <div class="creator-info">
-              <a-avatar :src="creatorInfo.userAvatar" :size="32">
-                {{ creatorName.slice(0, 1) }}
+              <a-avatar :size="32" :style="getAvatarStyle(creatorName)" class="creator-avatar">
+                {{ getAvatarText(creatorName) }}
               </a-avatar>
               <span class="creator-name">{{ creatorName }}</span>
             </div>
@@ -128,6 +129,11 @@ const formatDate = (dateStr?: string) => {
   align-items: center;
   min-width: 0;
   gap: 8px;
+}
+
+.creator-avatar {
+  flex-shrink: 0;
+  font-weight: 500;
 }
 
 .creator-name,
