@@ -10,7 +10,20 @@ import AppCard from '@/components/AppCard.vue'
 
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
-const deployBaseUrl = import.meta.env.VITE_APP_DEPLOY_BASE_URL || 'http://localhost'
+const getDeployBaseUrl = () => {
+  const envBaseUrl = import.meta.env.VITE_APP_DEPLOY_BASE_URL?.trim()
+  let base: string
+  if (envBaseUrl) {
+    base = envBaseUrl.replace(/\/$/, '')
+  } else if (typeof window !== 'undefined' && window.location?.origin) {
+    base = window.location.origin
+  } else {
+    base = 'http://localhost'
+  }
+  // 拼接 /dist
+  return `${base}/dist`
+}
+
 const pendingPromptStoragePrefix = 'app-chat-pending-prompt:'
 const isAdmin = computed(() => loginUserStore.loginUser?.userRole === ACCESS_ENUM.ADMIN)
 const myAppsTitle = computed(() => (isAdmin.value ? '全部作品' : '我的作品'))
@@ -132,7 +145,7 @@ const goToAppChat = (appId: string) => {
 // 打开查看作品
 const openAppWork = (deployKey?: string) => {
   if (!deployKey) return
-  window.open(`${deployBaseUrl}/${deployKey}`, '_blank', 'noopener,noreferrer')
+  window.open(new URL(deployKey, `${getDeployBaseUrl()}/`).href, '_blank', 'noopener,noreferrer')
 }
 
 onMounted(async () => {
@@ -151,7 +164,7 @@ onMounted(async () => {
       <div class="hero-content">
         <h1 class="hero-title">AI 应用生成平台</h1>
         <p class="hero-subtitle">一句话轻松创建网站应用</p>
-        
+
         <!-- 输入框区域 -->
         <div class="prompt-input-wrapper">
           <a-textarea
@@ -162,7 +175,7 @@ onMounted(async () => {
           />
           <div class="prompt-actions">
             <div class="action-buttons">
-              <a-button type="text">
+              <a-button type="text" disabled>
                 <template #icon><PaperClipOutlined /></template>
                 上传
               </a-button>
@@ -178,9 +191,9 @@ onMounted(async () => {
                 </a-button>
               </a-tooltip>
             </div>
-            <a-button 
-              type="primary" 
-              shape="circle" 
+            <a-button
+              type="primary"
+              shape="circle"
               :disabled="!prompt.trim() || isCreatingApp"
               :loading="isCreatingApp"
               @click="handleCreateApp"
@@ -189,13 +202,13 @@ onMounted(async () => {
             </a-button>
           </div>
         </div>
-        
+
         <!-- 推荐关键词 -->
         <div class="recommend-keywords">
           <div class="keywords-label">推荐：</div>
           <div class="keywords-list">
-            <a-tag 
-              v-for="keyword in recommendKeywords" 
+            <a-tag
+              v-for="keyword in recommendKeywords"
               :key="keyword"
               class="keyword-tag"
               @click="useKeyword(keyword)"
@@ -429,11 +442,11 @@ onMounted(async () => {
   .hero-title {
     font-size: 36px;
   }
-  
+
   .hero-subtitle {
     font-size: 16px;
   }
-  
+
   .app-grid {
     grid-template-columns: 1fr;
   }

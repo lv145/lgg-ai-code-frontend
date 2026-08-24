@@ -1803,11 +1803,8 @@ watch(previewStatus, (status) => {
             />
             <div class="input-actions">
               <div class="action-buttons">
-                <a-button type="text" size="small" :disabled="!canChat">
+                <a-button type="text" size="small" disabled>
                   <template #icon><PaperClipOutlined /></template>
-                </a-button>
-                <a-button type="text" size="small" :disabled="!canChat">
-                  <template #icon><EditOutlined /></template>
                 </a-button>
               </div>
               <div class="send-actions">
