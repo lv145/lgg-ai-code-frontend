@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { COPYRIGHT_TEXT } from '@/constants/site'
+
 const footerLink = 'https://github.com/'
 </script>
 
 <template>
   <a-layout-footer class="global-footer">
-    <a :href="footerLink" target="_blank" rel="noopener noreferrer"> AI-Code by Lgg </a>
+    <a :href="footerLink" target="_blank" rel="noopener noreferrer">{{ COPYRIGHT_TEXT }}</a>
   </a-layout-footer>
 </template>
 

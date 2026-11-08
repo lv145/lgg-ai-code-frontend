@@ -10,8 +10,9 @@ import { useLoginUserStore } from '@/stores/loginUser.ts'
 import { userLogout } from "@/api/userController.ts"
 import { message } from 'ant-design-vue'
 import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
+import { APP_NAME } from '@/constants/site'
 const loginUserStore = useLoginUserStore()
-const siteTitle = 'AI 零代码生成平台'
+const siteTitle = APP_NAME
 const router = useRouter()
 const route = useRoute()
 

@@ -7,6 +7,7 @@ import { addApp, listAppVoByPage, listMyAppVoByPage, listFeaturedAppVoByPage } f
 import { useLoginUserStore } from '@/stores/loginUser'
 import ACCESS_ENUM from '@/access/accessEnum'
 import AppCard from '@/components/AppCard.vue'
+import { APP_NAME, SITE_DESCRIPTION } from '@/constants/site'
 
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
@@ -162,8 +163,8 @@ onMounted(async () => {
     <!-- 顶部区域 -->
     <div class="hero-section">
       <div class="hero-content">
-        <h1 class="hero-title">AI 应用生成平台</h1>
-        <p class="hero-subtitle">一句话轻松创建网站应用</p>
+        <h1 class="hero-title">{{ APP_NAME }}</h1>
+        <p class="hero-subtitle">{{ SITE_DESCRIPTION }}</p>
 
         <!-- 输入框区域 -->
         <div class="prompt-input-wrapper">
