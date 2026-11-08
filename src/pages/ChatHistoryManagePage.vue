@@ -206,8 +206,14 @@ const columns = [
 
 <style scoped>
 #chatHistoryManagePage {
-  padding: 24px;
+  padding: 28px clamp(18px, 4vw, 48px);
+  min-height: calc(100vh - 120px);
 }
+
+#chatHistoryManagePage :deep(.ant-form) { padding:20px; border:1px solid #efedf3; border-radius:14px; background:#fff; }
+#chatHistoryManagePage :deep(.ant-table-wrapper) { padding:4px 18px 16px; border:1px solid #efedf3; border-radius:14px; background:#fff; }
+#chatHistoryManagePage :deep(.ant-table-thead > tr > th) { color:#706d80; background:#f8f7fb; font-weight:600; }
+#chatHistoryManagePage :deep(.ant-table-tbody > tr:hover > td) { background:#faf9fd; }
 
 .search-number-input {
   width: 180px;

@@ -88,18 +88,19 @@ const formatTime = (time: string) => {
 
 <style scoped>
 .app-card {
-  background: rgba(255, 255, 255, 0.94);
-  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #efedf3;
+  border-radius: 16px;
   overflow: hidden;
   transition:
     transform 0.2s,
     box-shadow 0.2s;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 6px 20px rgba(31, 26, 55, 0.045);
 }
 
 .app-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 14px 30px rgba(31, 26, 55, 0.10);
 }
 
 .app-header {
@@ -107,7 +108,7 @@ const formatTime = (time: string) => {
   align-items: center;
   gap: 12px;
   padding: 16px 16px 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #f3f2f6;
 }
 
 .app-creator-avatar {
@@ -123,7 +124,7 @@ const formatTime = (time: string) => {
 
 .app-name {
   margin: 0 0 6px;
-  color: #1a1a1a;
+  color: #29273b;
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
@@ -134,7 +135,7 @@ const formatTime = (time: string) => {
 
 .app-owner {
   margin: 0;
-  color: #666;
+  color: #858294;
   font-size: 13px;
   line-height: 1.3;
   white-space: nowrap;
@@ -200,11 +201,11 @@ const formatTime = (time: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #d9d4f8 0%, #9e91e0 100%);
 }
 
 .app-cover-placeholder.featured {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  background: linear-gradient(135deg, #eadbfb 0%, #c794d4 100%);
 }
 
 .placeholder-icon {
@@ -218,7 +219,7 @@ const formatTime = (time: string) => {
 
 .app-time {
   font-size: 14px;
-  color: #999;
+  color: #9693a3;
   margin: 0;
 }
 
@@ -240,5 +241,11 @@ const formatTime = (time: string) => {
   .app-info {
     padding: 10px 14px 14px;
   }
+}
+
+@media (hover: none) {
+  .app-cover::after { opacity: 1; background:linear-gradient(180deg,transparent 45%,rgba(20,18,35,.46)); }
+  .app-cover-actions { inset:auto 0 0; justify-content:flex-start; opacity:1; pointer-events:auto; }
+  .app-cover-actions :deep(.ant-btn) { min-width:auto; height:38px; padding:0 12px; font-size:13px; }
 }
 </style>

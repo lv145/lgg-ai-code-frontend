@@ -171,10 +171,15 @@ onMounted(() => {
 
 <style scoped>
 #appEditPage {
-  padding: 24px;
-  max-width: 800px;
+  padding: 34px clamp(18px, 4vw, 40px);
+  max-width: 900px;
   margin: 0 auto;
 }
+
+#appEditPage :deep(.ant-card) { border:1px solid #efedf3; border-radius:16px; box-shadow:0 8px 24px rgba(31,26,55,.045); }
+#appEditPage :deep(.ant-card-head-title) { color:#29273b; font-size:19px; font-weight:650; }
+#appEditPage :deep(.ant-input), #appEditPage :deep(.ant-input-number), #appEditPage :deep(.ant-input-number-input) { border-radius:8px; }
+#appEditPage :deep(.ant-btn-primary) { border-radius:8px; background:#7362d2; }
 
 .cover-preview {
   margin-top: 12px;

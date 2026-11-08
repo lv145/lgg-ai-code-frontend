@@ -9,11 +9,12 @@ import GlobalFooter from '@/components/GlobalFooter.vue'
 
 const route = useRoute()
 const isChatPage = computed(() => route.name === '应用对话')
+const isAuthPage = computed(() => route.name === '用户登录' || route.name === '用户注册')
 </script>
 
 <template>
   <a-layout class="basic-layout">
-    <a-layout-header class="layout-header">
+    <a-layout-header v-if="!isAuthPage" class="layout-header">
       <GlobalHeader />
     </a-layout-header>
 
@@ -21,7 +22,7 @@ const isChatPage = computed(() => route.name === '应用对话')
       <RouterView />
     </a-layout-content>
 
-    <GlobalFooter v-if="!isChatPage" />
+    <GlobalFooter v-if="!isChatPage && !isAuthPage" />
   </a-layout>
 </template>
 
@@ -32,6 +33,9 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
+  color: #29273b;
+  background: #f8f9fc;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 </style>
 
@@ -49,7 +53,7 @@ body,
   height: 64px;
   padding: 0;
   line-height: 64px;
-  background: #fff;
+  background: #f8f9fc;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 

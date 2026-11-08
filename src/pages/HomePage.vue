@@ -163,6 +163,7 @@ onMounted(async () => {
     <!-- 顶部区域 -->
     <div class="hero-section">
       <div class="hero-content">
+        <div class="hero-kicker"><span class="hero-kicker-dot"></span>AI 驱动 · 灵感即刻落地</div>
         <h1 class="hero-title">{{ APP_NAME }}</h1>
         <p class="hero-subtitle">{{ SITE_DESCRIPTION }}</p>
 
@@ -285,17 +286,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.home-page {
-  min-height: 100vh;
-  width: 100%;
-  background:
-    radial-gradient(circle at 18% 8%, rgba(24, 144, 255, 0.32) 0, transparent 28%),
-    radial-gradient(circle at 86% 12%, rgba(114, 46, 209, 0.28) 0, transparent 30%),
-    linear-gradient(135deg, #eef7ff 0%, #f8fbff 42%, #edf4ff 100%);
-}
+.home-page { min-height:100vh; width:100%; background:radial-gradient(ellipse at 50% -4%,#eeebff 0%,transparent 40%),#f8f9fc; }
 
 .hero-section {
-  padding: 72px 20px 38px;
+  padding: 70px 20px 38px;
   text-align: center;
 }
 
@@ -306,26 +300,34 @@ onMounted(async () => {
 
 .hero-title {
   margin: 0 0 16px;
-  color: #0f172a;
-  font-size: 56px;
-  font-weight: 800;
+  color: #252238;
+  font-size: clamp(36px, 5.4vw, 56px);
+  font-weight: 720;
   line-height: 1.12;
 }
 
 .hero-subtitle {
   margin: 0 0 36px;
-  color: #475569;
-  font-size: 20px;
+  color: #77758a;
+  font-size: 17px;
+  line-height: 1.8;
 }
+
+.hero-kicker { display:inline-flex; align-items:center; gap:8px; margin-bottom:20px; padding:7px 12px; border:1px solid #e7e3f8; border-radius:999px; color:#7164b6; background:#fff9; font-size:12px; }
+.hero-kicker-dot { width:7px; height:7px; border-radius:50%; background:#8b77ec; box-shadow:0 0 0 4px #8b77ec20; }
 
 .prompt-input-wrapper {
   max-width: 760px;
   margin: 0 auto;
-  padding: 18px;
-  background: rgba(255, 255, 255, 0.88);
+  padding: 17px 20px;
+  background: #fff;
+  border: 1px solid #eeedf3;
   border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(30, 64, 175, 0.16);
+  box-shadow: 0 18px 48px rgba(39, 34, 72, 0.09);
+  transition: border-color .2s, box-shadow .2s, transform .2s;
 }
+
+.prompt-input-wrapper:focus-within { border-color:#bdb2f1; box-shadow:0 20px 54px rgba(93,73,177,.15); transform:translateY(-2px); }
 
 .prompt-input {
   border: none;
@@ -358,8 +360,8 @@ onMounted(async () => {
 }
 
 .mode-toggle-button.active {
-  color: #1677ff;
-  background: rgba(22, 119, 255, 0.1);
+  color: #7060c9;
+  background: #f1effb;
 }
 
 .recommend-keywords {
@@ -394,37 +396,39 @@ onMounted(async () => {
   text-align: left;
   line-height: 1.55;
   transition: all 0.2s;
-  border-color: rgba(59, 130, 246, 0.18);
-  background: rgba(255, 255, 255, 0.78);
+  border-color: #ebe9f2;
+  border-radius: 999px;
+  background: #fff;
 }
 
 .keyword-tag:hover {
-  color: #1677ff;
-  border-color: #1677ff;
+  color: #6f5ec5;
+  border-color: #bfb4ee;
   background: #fff;
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow:0 5px 14px #41347c10;
 }
 
 .section {
-  max-width: 1200px;
+  max-width: 1160px;
   margin: 0 auto;
-  padding: 40px 20px;
+  padding: 32px 24px;
 }
 
 .section-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .section-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: #0f172a;
+  font-size: 21px;
+  font-weight: 650;
+  color: #29273b;
 }
 
 .app-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 24px;
+  gap: 20px;
 }
 
 .empty-state {
@@ -451,6 +455,8 @@ onMounted(async () => {
   .app-grid {
     grid-template-columns: 1fr;
   }
+  .hero-section { padding:44px 18px 22px; }
+  .section { padding:26px 18px; }
 
 }
 </style>

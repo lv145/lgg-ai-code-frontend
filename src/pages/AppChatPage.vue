@@ -1877,7 +1877,7 @@ watch(previewStatus, (status) => {
   height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
-  background: #f5f5f5;
+  background: #f7f7fb;
   overflow: hidden;
 }
 
@@ -1887,8 +1887,8 @@ watch(previewStatus, (status) => {
   align-items: center;
   padding: 8px 16px;
   background: white;
-  border-bottom: 1px solid #e8e8e8;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid #eeedf3;
+  box-shadow: 0 2px 10px rgba(36, 31, 67, 0.035);
 }
 
 .top-bar-left {
@@ -1909,7 +1909,7 @@ watch(previewStatus, (status) => {
   font-size: 18px;
   font-weight: 600;
   margin: 0;
-  color: #1a1a1a;
+  color: #29273b;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1992,7 +1992,7 @@ watch(previewStatus, (status) => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #e8e8e8;
+  border-right: 1px solid #eeedf3;
   background: #fff;
 }
 
@@ -2058,7 +2058,7 @@ watch(previewStatus, (status) => {
 }
 
 .message.user .message-content {
-  background: #1677ff;
+  background: #7362d2;
   color: white;
 }
 
@@ -2091,7 +2091,7 @@ watch(previewStatus, (status) => {
   align-items: flex-start;
   gap: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid #eeedf3;
 }
 
 .workflow-title {
@@ -2150,8 +2150,8 @@ watch(previewStatus, (status) => {
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: #1677ff;
-  background: #eff6ff;
+  color: #7362d2;
+  background: #f0edfb;
   border-radius: 50%;
 }
 
@@ -2279,7 +2279,7 @@ watch(previewStatus, (status) => {
 }
 
 .markdown-body :deep(a) {
-  color: #1677ff;
+  color: #7060c9;
   text-decoration: none;
 }
 

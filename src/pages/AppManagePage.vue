@@ -252,8 +252,15 @@ const columns = [
 
 <style scoped>
 #appManagePage {
-  padding: 24px;
+  padding: 28px clamp(18px, 4vw, 48px);
+  min-height: calc(100vh - 120px);
 }
+
+#appManagePage :deep(.ant-form) { padding:20px; border:1px solid #efedf3; border-radius:14px; background:#fff; }
+#appManagePage :deep(.ant-table-wrapper) { padding:4px 18px 16px; border:1px solid #efedf3; border-radius:14px; background:#fff; }
+#appManagePage :deep(.ant-table-thead > tr > th) { color:#706d80; background:#f8f7fb; font-weight:600; }
+#appManagePage :deep(.ant-table-tbody > tr:hover > td) { background:#faf9fd; }
+#appManagePage :deep(.ant-input), #appManagePage :deep(.ant-select-selector) { border-radius:8px !important; }
 
 .creator-input {
   width: 180px;

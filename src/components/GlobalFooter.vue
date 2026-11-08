@@ -15,17 +15,17 @@ const footerLink = 'https://github.com/'
   flex-shrink: 0;
   padding: 16px 24px;
   text-align: center;
-  background: #f5f5f5;
-  border-top: 1px solid #f0f0f0;
+  background: #f8f9fc;
+  border-top: 1px solid #efedf3;
 }
 
 .global-footer a {
-  color: rgba(0, 0, 0, 0.65);
+  color: #898697;
   text-decoration: none;
   transition: color 0.3s;
 }
 
 .global-footer a:hover {
-  color: #1677ff;
+  color: #7161ce;
 }
 </style>

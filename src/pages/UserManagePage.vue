@@ -16,11 +16,11 @@
     </a-form>
     <a-divider />
     <!-- 表格 -->
-  </div>
   <a-table
     :columns="columns"
     :data-source="data"
     :pagination="pagination"
+    :scroll="{ x: 1400 }"
     @change="doTableChange"
   >
 
@@ -57,6 +57,7 @@
     </template>
 
   </a-table>
+  </div>
 </template>
 <script lang="ts" setup>
 import { SmileOutlined } from '@ant-design/icons-vue';
@@ -174,8 +175,15 @@ const columns = [
 
 <style scoped>
 #userManagePage {
-  padding: 24px;
+  padding: 28px clamp(18px, 4vw, 48px);
+  min-height: calc(100vh - 120px);
 }
+
+#userManagePage :deep(.ant-form) { padding:20px; border:1px solid #efedf3; border-radius:14px; background:#fff; }
+#userManagePage :deep(.ant-table-wrapper) { padding:4px 18px 16px; border:1px solid #efedf3; border-radius:14px; background:#fff; }
+#userManagePage :deep(.ant-table-thead > tr > th) { color:#706d80; background:#f8f7fb; font-weight:600; }
+#userManagePage :deep(.ant-table-tbody > tr:hover > td) { background:#faf9fd; }
+#userManagePage :deep(.ant-input) { border-radius:8px; }
 
 .user-avatar {
   font-size: 20px;

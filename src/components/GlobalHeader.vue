@@ -160,8 +160,9 @@ const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
   justify-content: space-between;
   width: 100%;
   height: 64px;
-  padding: 0 24px;
-  background: #fff;
+  padding: 0 clamp(16px, 4vw, 48px);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(16px);
 }
 
 .header-left {
@@ -188,7 +189,7 @@ const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
 
 .site-title {
   margin-left: 12px;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -203,6 +204,13 @@ const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
 .desktop-menu {
   display: block;
 }
+
+.global-header :deep(.ant-menu-item) { border-radius:9px; transition:color .18s,background .18s; }
+.global-header :deep(.ant-menu-item-selected) { color:#7161ce; background:#f3f0fc; }
+.global-header :deep(.ant-menu-item-selected::after) { border-bottom-color:#7969d2; }
+.global-header :deep(.ant-btn-primary) { border-radius:9px; background:#7362d2; }
+.header-right :deep(.ant-dropdown-trigger) { cursor:pointer; border-radius:999px; padding:5px 10px; transition:background .2s; }
+.header-right :deep(.ant-dropdown-trigger:hover) { background:#f5f3fa; }
 
 .header-right {
   display: flex;
