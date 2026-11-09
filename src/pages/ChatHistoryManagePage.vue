@@ -51,6 +51,8 @@
       :columns="columns"
       :data-source="data"
       :pagination="pagination"
+      :scroll="{ x: 1790 }"
+      table-layout="fixed"
       row-key="id"
       @change="doTableChange"
     >
@@ -61,11 +63,7 @@
           </a-tag>
         </template>
         <template v-else-if="column.dataIndex === 'message'">
-          <a-typography-paragraph
-            class="message-cell"
-            :ellipsis="{ rows: 2, expandable: true, symbol: '展开' }"
-            :content="record.message || '-'"
-          />
+          <MessagePreview :content="record.message" @view="viewMessage" />
         </template>
         <template v-else-if="column.dataIndex === 'createTime'">
           {{ formatDate(record.createTime) }}
@@ -80,6 +78,17 @@
         </template>
       </template>
     </a-table>
+    <a-modal
+      v-model:open="messageModalOpen"
+      title="消息内容"
+      width="80vw"
+      centered
+      :footer="null"
+      :body-style="{ height: '70dvh', overflow: 'auto' }"
+      :after-close="clearSelectedMessage"
+    >
+      <pre class="message-detail">{{ selectedMessage }}</pre>
+    </a-modal>
   </div>
 </template>
 
@@ -87,9 +96,21 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { listChatHistoryByPage } from '@/api/chatHistoryController'
+import MessagePreview from '@/components/MessagePreview.vue'
 
 const data = ref<API.ChatHistory[]>([])
 const total = ref(0)
+const messageModalOpen = ref(false)
+const selectedMessage = ref('')
+
+const viewMessage = (content?: string) => {
+  selectedMessage.value = content || '-'
+  messageModalOpen.value = true
+}
+
+const clearSelectedMessage = () => {
+  selectedMessage.value = ''
+}
 
 const searchParams = reactive<API.ChatHistoryQueryRequest>({
   pageNum: 1,
@@ -160,52 +181,55 @@ const columns = [
   {
     title: 'ID',
     dataIndex: 'id',
-    width: 160,
+    width: 190,
   },
   {
     title: '应用ID',
     dataIndex: 'appId',
-    width: 160,
+    width: 190,
   },
   {
     title: '用户ID',
     dataIndex: 'userId',
-    width: 160,
+    width: 130,
+    ellipsis: true,
   },
   {
     title: '消息类型',
     dataIndex: 'messageType',
-    width: 120,
+    width: 100,
   },
   {
     title: '消息内容',
     dataIndex: 'message',
+    width: 560,
   },
   {
     title: '父消息ID',
     dataIndex: 'parentId',
-    width: 160,
+    width: 190,
   },
   {
     title: '状态',
     dataIndex: 'isDelete',
-    width: 100,
+    width: 90,
   },
   {
     title: '创建时间',
     dataIndex: 'createTime',
-    width: 180,
+    width: 170,
   },
   {
     title: '更新时间',
     dataIndex: 'updateTime',
-    width: 180,
+    width: 170,
   },
 ]
 </script>
 
 <style scoped>
 #chatHistoryManagePage {
+  min-width: 0;
   padding: 28px clamp(18px, 4vw, 48px);
   min-height: calc(100vh - 120px);
 }
@@ -223,8 +247,14 @@ const columns = [
   width: 160px;
 }
 
-.message-cell {
-  max-width: 520px;
-  margin-bottom: 0;
+.message-detail {
+  margin: 0;
+  padding: 12px;
+  color: #373447;
+  background: #f8f7fb;
+  border-radius: 8px;
+  font: 14px/1.8 ui-monospace, SFMono-Regular, Consolas, "Microsoft YaHei", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>
