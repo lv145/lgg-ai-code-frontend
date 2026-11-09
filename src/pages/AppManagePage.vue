@@ -140,6 +140,9 @@ const doDelete = (id?: string) => {
   Modal.confirm({
     title: '确认删除',
     content: '确定要删除这个应用吗？删除后无法恢复。',
+    okText: '确认删除',
+    cancelText: '取消',
+    okButtonProps: { danger: true },
     onOk: async () => {
       const res = await adminDeleteApp({ id })
       if (res.data.code === 0) {

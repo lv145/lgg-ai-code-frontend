@@ -52,7 +52,11 @@
         {{ dayjs(record.createTime).format('YYYY-MM-DD HH:mm:ss') }}
       </template>
       <template v-else-if="column.key === 'action'">
-        <a-button danger @click="doDelete(record.id)">删除</a-button>
+        <a-button
+          v-if="String(record.id) !== String(loginUserStore.loginUser.id)"
+          danger
+          @click="doDelete(record.id)"
+        >删除</a-button>
       </template>
     </template>
 
@@ -61,12 +65,15 @@
 </template>
 <script lang="ts" setup>
 import { SmileOutlined } from '@ant-design/icons-vue';
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { onMounted, ref, reactive } from 'vue'
 import {deleteUser, listUserVoByPage } from '@/api/userController'
 import dayjs from "dayjs";
 import { computed } from "vue";
 import { getAvatarStyle, getAvatarText } from '@/utils/avatar'
+import { useLoginUserStore } from '@/stores/loginUser'
+
+const loginUserStore = useLoginUserStore()
 
 // 数据
 const data = ref<API.UserVO[]>([])
@@ -82,14 +89,23 @@ const doDelete = async (id?: string) => {
   if (!id) {
     return
   }
-  const res = await deleteUser({ id })
-  if (res.data.code === 0) {
-    message.success('删除成功')
-    // 刷新数据
-    fetchData()
-  } else {
-    message.error('删除失败')
-  }
+  if (String(id) === String(loginUserStore.loginUser.id)) return
+  Modal.confirm({
+    title: '确认删除用户',
+    content: '删除后无法恢复，确定要删除该用户吗？',
+    okText: '确认删除',
+    cancelText: '取消',
+    okButtonProps: { danger: true },
+    onOk: async () => {
+      const res = await deleteUser({ id })
+      if (res.data.code === 0) {
+        message.success('删除成功')
+        fetchData()
+      } else {
+        message.error('删除失败：' + res.data.message)
+      }
+    },
+  })
 }
 
 // 搜索条件
